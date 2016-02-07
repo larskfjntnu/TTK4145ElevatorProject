@@ -1,3 +1,4 @@
+package Queue
 /*
 	This module keeps this elevators queue.
 	The queue is implemented as a m x 3 matrix

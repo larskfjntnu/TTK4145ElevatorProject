@@ -1,3 +1,4 @@
+package Hardware
 /*
 	This is the module wich interact with the hardware of the elevator.
 	It runs as a separate goroutine wich continously 'pings' the hardware
