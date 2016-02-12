@@ -12,9 +12,12 @@ package queue
 	It also implements an initialize function, which allocates the queue.
 */
 
-import "typedef"
+import(
+ "typedef"
+ "fmt"
+ )
 
-var queue [][]int
+var queue [4][3]int
 
 /*
 	This function initalizes the queue as a numberOfFloors x numberOfOrderTypes
@@ -22,12 +25,14 @@ var queue [][]int
 */
 
 func Init(numberOfFloors, numberOfOrderTypes int) error {
-	queue := make([][]int, numberOfOrderTypes)
+	queue := make([][]int, numberOfFloors)
 	for row := 0; row < numberOfFloors; row++ {
 		queue[row] = make([]int, numberOfOrderTypes)
 		for element := range queue[row] {
 			queue[row][element] = 0
+			fmt.Printf("%d\t", queue[row][element])
 		}
+		fmt.Printf("\n")
 	}
 	// TODO -> AcceptanceTest, check the dimensions of the array
 	//			and also possible that all elemets sum to zero.
@@ -38,7 +43,7 @@ func Init(numberOfFloors, numberOfOrderTypes int) error {
 	This function sets or cancels an order at the given floor, and
 	of the given type based on the value.
 */
-func setOrder(floor, orderType, value int) {
+func SetOrder(floor, orderType, value int) {
 	queue[floor][orderType] = value
 	// TODO -> AcceptanceTest, check the element is what we set it to.
 }
@@ -48,22 +53,22 @@ func setOrder(floor, orderType, value int) {
 	Down direction is 0, up is 1 ?
 	If error, return = -1;
 */
-func checkOrder(floor, direction int) int {
+func CheckOrder(floor, direction int) bool {
 	// TODO -> Do some logic to convert direction to column index
 	// Check if ordered internally
-	if queue[floor][3] == 1 { // This is also an acceptance test, why?
+	if queue[floor][2] == 1 { // This is also an acceptance test, why?
 		// TODO -> The floor is ordered internally
-		return 1
+		return true
 	} else if queue[floor][direction] == 1 { // This is also an acceptance test, why?
 		// TODO -> The floor is not ordered
 		// 9/2 -16 changed if statetement from 0 to 1, possible typo?
-		return 1
+		return true
 	}
-	return 0
+	return false
 }
 
 // Check if there are any orders. Returns -1 for down, 1 for up and 0 for none
-func anyOrders(atFloor, previousDirection int) int {
+func AnyOrders(atFloor, previousDirection int) int {
 	// TODO -> Also do this better.
 	for floor := 0; floor < typedef.N_FLOORS; floor++ {
 		for direction := 0; direction < 3; direction++ {
@@ -79,4 +84,14 @@ func anyOrders(atFloor, previousDirection int) int {
 		}
 	}
 	return 0
+}
+
+func PrintQue(){
+	fmt.Println(len(queue))
+	for row := range queue {
+		for element := range queue[row] {
+			fmt.Printf("%d\t", queue[row][element])
+		}
+		fmt.Printf("\n")
+	}
 }

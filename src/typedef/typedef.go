@@ -1,6 +1,7 @@
 package typedef
 
 const N_FLOORS int = 4 // TODO -> Do this dynamically.
+const N_BUTTONS int = 3
 
 // --------------- EVENT STRUCTS -----------------
 type ButtonEvent struct{
