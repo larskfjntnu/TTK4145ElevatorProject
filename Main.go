@@ -17,68 +17,101 @@ package main
 	respond to the order.
 */
 import (
-	"log"
-	"runtime"
+	"fmt"
 	"time"
-
-	"./src/network"
-	"./src/typedef"
+	"./src/udp"
 )
+const sending = false
 
-const debug = true
-const broadcast = true
+// const debug = true
+// const broadcast = true
 
-// This function starts the program. The while loop inside runs throughout
-// the lifetime of the program.
-func main() {
-	// Do some initialization. Determine wether Master or slave/client.
-	runtime.GOMAXPROCS(runtime.NumCPU())
-	const connectionAttempsLimit = 10
-	const iAmAliveTickTime = 100 * time.Millisecond
-	const ackTimeout = 500 * time.Millisecond
+// // This function starts the program. The while loop inside runs throughout
+// // the lifetime of the program.
+// func main() {
+// 	// Do some initialization. Determine wether Master or slave/client.
+// 	runtime.GOMAXPROCS(runtime.NumCPU())
+// 	const connectionAttempsLimit = 10
+// 	const iAmAliveTickTime = 100 * time.Millisecond
+// 	const ackTimeout = 500 * time.Millisecond
 
-	//	------------- Initialize network ----------------
-	receiveChannel := make(chan typedef.SomeStructToPassOnNetwork, 5)
-	sendChannel := make(chan typedef.SomeStructToPassOnNetwork)
-	localIP, err := initNetwork(connectionAttempsLimit, receiveChannel, sendChannel)
-	if err != nil {
-		log.Println("MAIN:\t Network init failed")
-		log.Fatal(err)
-	} else if debug {
-		log.Println("MAIN:\t Network init succesful")
-		log.Printf("MAIN:\t LocalIp:\t %s\n", localIP)
+// 	//	------------- Initialize network ----------------
+// 	receiveChannel := make(chan typedef.SomeStructToPassOnNetwork, 5)
+// 	sendChannel := make(chan typedef.SomeStructToPassOnNetwork)
+// 	localIP, err := initNetwork(connectionAttempsLimit, receiveChannel, sendChannel)
+// 	if err != nil {
+// 		log.Println("MAIN:\t Network init failed")
+// 		log.Fatal(err)
+// 	} else if debug {
+// 		log.Println("MAIN:\t Network init succesful")
+// 		log.Printf("MAIN:\t LocalIp:\t %s\n", localIP)
+// 	}
+// 	if broadcast {
+// 		sendChannel <- typedef.SomeStructToPassOnNetwork{
+// 			Message:  "Hi, i'm broadcasting!",
+// 			SenderIp: localIP,
+// 		}
+// 	}
+
+// 	// This is the main loop running continuously.
+// 	for {
+// 		// TODO -> Implement the main logic of the elevator.
+// 		select {
+// 		case message := <-receiveChannel:
+// 			log.Println("MAIN:\t Received message!")
+// 			log.Println(message.Message)
+// 		}
+// 	}
+// }
+
+// func initNetwork(connectionAttempsLimit int, receiveChannel, sendChannel chan typedef.SomeStructToPassOnNetwork) (localIP string, err error) {
+// 	for i := 0; i <= connectionAttempsLimit; i++ {
+// 		localIP, err := network.Init(receiveChannel, sendChannel)
+// 		if err != nil {
+// 			if i == 0 {
+// 				log.Println("MAIN:\t Network init was not successfull. Trying some more times.")
+// 			} else if i == connectionAttempsLimit {
+// 				return "", err
+// 			}
+// 			time.Sleep(3 * time.Second)
+// 		} else {
+// 			return localIP, nil
+// 		}
+// 	}
+// 	return "", nil
+// }
+
+func print_udp_message(msg udp.UDPMessage){
+	fmt.Printf("msg:  \n \t raddr = %s \n \t data = %s \n \t length = %v \n", msg.RAddress, msg.Data, msg.Length)
+}
+
+func node (send_ch, receive_ch chan udp.UDPMessage){
+for {
+	time.Sleep(1*time.Second)
+	snd_msg := udp.UDPMessage{RAddress:"broadcast", Data:[]byte("Hello World"), Length:11}
+	if sending {
+		fmt.Printf("Sending------\n")
+		send_ch <- snd_msg
+		print_udp_message(snd_msg)
 	}
-	if broadcast {
-		sendChannel <- typedef.SomeStructToPassOnNetwork{
-			Message:  "Hi, i'm broadcasting!",
-			SenderIp: localIP,
-		}
-	}
-
-	// This is the main loop running continuously.
-	for {
-		// TODO -> Implement the main logic of the elevator.
-		select {
-		case message := <-receiveChannel:
-			log.Println("MAIN:\t Received message!")
-			log.Println(message.Message)
-		}
+	fmt.Printf("Receiving----\n")
+	rcv_msg:= <- receive_ch
+	print_udp_message(rcv_msg)
 	}
 }
 
-func initNetwork(connectionAttempsLimit int, receiveChannel, sendChannel chan typedef.SomeStructToPassOnNetwork) (localIP string, err error) {
-	for i := 0; i <= connectionAttempsLimit; i++ {
-		localIP, err := network.Init(receiveChannel, sendChannel)
-		if err != nil {
-			if i == 0 {
-				log.Println("MAIN:\t Network init was not successfull. Trying some more times.")
-			} else if i == connectionAttempsLimit {
-				return "", err
-			}
-			time.Sleep(3 * time.Second)
-		} else {
-			return localIP, nil
-		}
+
+func main (){
+	send_ch := make (chan udp.UDPMessage)
+	receive_ch := make (chan udp.UDPMessage)
+	_, err := udp.Init(20001, 20002, 1024, send_ch, receive_ch)	
+	go node(send_ch, receive_ch)
+
+
+	if (err != nil){
+		fmt.Print("main done. err = %s \n", err)
 	}
-	return "", nil
+		neverReturn := make (chan int)
+	<-neverReturn
+
 }

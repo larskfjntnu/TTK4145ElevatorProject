@@ -2,17 +2,36 @@ package typedef
 
 const N_FLOORS int = 4 // TODO -> Do this dynamically.
 
-// Motor commands
-const UP = 1
-const STOP = 0
-const DOWN = -1
-
-// Temporary struct!
-// TODO -> Delete!
-type SomeStructToPassOnNetwork struct {
-	Message  string
-	SenderIp string
+// --------------- EVENT STRUCTS -----------------
+type ButtonEvent struct{
+	ButtonType int
+	Floor int
 }
+
+type LightEvent struct{
+	LightType int
+	Floor int
+	Value bool
+}
+
+type MotorEvent struct{
+	MotorDirection Direction
+}
+
+type FloorEvent struct{
+	CurrentDirection Direction
+	Floor int
+}
+
+
+// --------------------- "Enumerators" --------------------
+
+type Direction int 
+const(
+	DIR_DOWN Direction = -1 << iota 
+	DIR_STOP
+	DIR_UP
+)
 
 // Enumerators
 const (
@@ -22,6 +41,6 @@ const (
 	SENSOR_FLOOR
 	INDICATOR_FLOOR
 	BUTTON_STOP
-	SENSOR_OBST
-	INDICATOR_DOOR
+	OBSTRUCTION_SENS
+	DOOR_LAMP
 )
