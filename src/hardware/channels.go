@@ -1,5 +1,4 @@
-
-package driver
+package hardware
 
 const ET_comedi             = 0
 const ET_simulation         = 1

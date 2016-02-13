@@ -1,4 +1,4 @@
-package main
+package somepackage
 
 /*
 	This is the main module controlling the elevator and handling callbacks

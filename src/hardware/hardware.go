@@ -24,37 +24,24 @@ package hardware
 
 //		---------------------------------------------------------------------
 
-/*
-	Need to implement the driver source. These files are C code. 
-	Go recognices the 'import' statement within the comment and lets
-	us reference the functions in the interface of the C code in the
-	Go source code. The 'import "C" ' statement is a 'pseudo package' which
-	let cgo recognise the C namespace. 
-	The 'import "unsafe" ' is needed because the memory allocations made by
-	C are not known to the Go memory manager. When C creates a string or such,
-	we need to free this by calling C.free
-*/
-/*
-	#import driver/io.h
-*/
+
 import (
-	"C"
-	"typedef"
-	"driver"
-	"channels"
 	"fmt"
 	"time"
+	"typedef"
+	"driver"
+	"log"
 	)
 
 
-// ------------------------- CONSTANT and VARIABLE DECLERATIONS
-var lightChannelMatrix = [N_FLOORS][N_BUTTONS]{
+// ------------------------- CONSTANT and VARIABLE DECLERATdriver.IONS
+var lightChannelMatrix = [typedef.N_FLOORS][typedef.N_BUTTONS]int {
 	{LIGHT_UP1, LIGHT_DOWN1, LIGHT_COMMAND1},
 	{LIGHT_UP2, LIGHT_DOWN2, LIGHT_COMMAND2},
 	{LIGHT_UP3, LIGHT_DOWN3, LIGHT_COMMAND3},
 	{LIGHT_UP4, LIGHT_DOWN4, LIGHT_COMMAND4},
 }
-var buttonChannelMatrix = [N_FLOORS][N_BUTTONS]{
+var buttonChannelMatrix = [typedef.N_FLOORS][typedef.N_BUTTONS]int {
 	{BUTTON_UP1, BUTTON_DOWN1, BUTTON_COMMAND1},
 	{BUTTON_UP2, BUTTON_DOWN2, BUTTON_COMMAND2},
 	{BUTTON_UP3, BUTTON_DOWN3, BUTTON_COMMAND3},
@@ -78,7 +65,7 @@ type MotorEvent struct{
 }
 
 type FloorEvent struct{
-	CurrentDirection Direction
+	CurrentDirection int
 	Floor int
 }
 
@@ -90,35 +77,40 @@ var initialized bool = false
 const motorspeed = 2800
 
 
-//		-----------------------  FUNCTION DECLERATIONS    -----------------------------------
+
+//		-----------------------  FUNCTdriver.ION DECLERATdriver.IONS    -----------------------------------
 
 
-func Init(buttonChannel chan<- ButtonEvent, lightChannel <-chan LightEvent, motorChannel <-chan MotorEvent, floorChannel chan<- FloorEvent, pollingDelay time.Duration) error{
+func Init(buttonChannel chan<- ButtonEvent, lightChannel <-chan LightEvent, motorChannel <-chan int, floorChannel chan<- FloorEvent, pollingDelay time.Duration) error{
 	if initialized{
 		return fmt.Errorf("Hardware is already initialized.")
 	}
-	initSuccess := IOInit()
+	initSuccess := driver.IOInit()
 	if initSuccess!=nil{
 		return fmt.Errorf("Unable to initialize hardware.")
 	}
 	resetLights()
 
-	// Start goroutines to handle hardware events.
-	go controlLights(lightChannel)
-	go controlMotor(motorChannel)
-	motorChannel<-DIR_STOP
+	setMotorDirection(typedef.DIR_STOP)
 	// If initialized between floors, move down to nearest floor.
 	if checkFloor() == -1 {
-		motorChannel <- DIR_DOWN
+		fmt.Printf("HARDWARE:\t Starting between floors, going down.\n")
+		setMotorDirection(typedef.DIR_DOWN)
 		for {
-			if checkFloor() != -1 {
-				motorChannel <- DIR_STOP
+			if floor:= checkFloor(); floor != -1 {
+				fmt.Printf("HARDWARE:\t INIT -> Arrived at floor: %d\n", floor)
+				setMotorDirection(typedef.DIR_STOP)
+				floorChannel <- FloorEvent{CurrentDirection: typedef.DIR_STOP, Floor: floor}
 				break
 			} else {
 				time.Sleep(pollingDelay)
 			}
 		}
 	}
+
+	// Start goroutines to handle hardware events.
+	go controlLights(lightChannel)
+	go controlMotor(motorChannel)
 	go readButtons(buttonChannel, pollingDelay)
 	go readFloorSensors(floorChannel, pollingDelay)
 	return nil
@@ -128,15 +120,15 @@ func Init(buttonChannel chan<- ButtonEvent, lightChannel <-chan LightEvent, moto
 
 // This function runs continously as a goroutine, pinging the hardware for button presses.
 func readButtons(buttonChannel chan<- ButtonEvent, pollingDelay time.Duration){
-	readingMatrix := [N_FLOORS][N_BUTTONS]bool{}
+	readingMatrix := [typedef.N_FLOORS][typedef.N_BUTTONS]bool{}
 	var stopButton bool = false
 	var stopState bool = false
 	var obstructionSignal = false
 	// This while loop runs continously, pinging the hardware for button presses.
 	for {
 		// Check if there are any new orders(buttons pressed).
-		for floor := 0; floor < N_FLOORS; floor ++ {
-			for buttonType := BUTTON_CALL_UP; buttonType < BUTTON_COMMAND; buttonType++ {
+		for floor := 0; floor < typedef.N_FLOORS; floor ++ {
+			for buttonType := typedef.BUTTON_CALL_UP; buttonType < typedef.BUTTON_COMMAND + 1; buttonType++ {
 				if checkButtonPressed(buttonType, floor) {
 					if !readingMatrix[floor][buttonType] {
 						readingMatrix[floor][buttonType] = true
@@ -153,18 +145,18 @@ func readButtons(buttonChannel chan<- ButtonEvent, pollingDelay time.Duration){
 		if checkStopSignal() {
 			if !stopButton {
 				stopButton = true
-				if stopButton && !stopState {
+				if stopButton && !stopState{
 					// First time we press stop
-					buttonChannel <- ButtonEvent{ButtonType: BUTTON_STOP, Value: true}
-					stopState = true
-				}  if stopButton && stopState {
+					buttonChannel <- ButtonEvent{ButtonType: typedef.BUTTON_STOP, Value: true}
+					stopState=true
+				} else if stopButton &&stopState{
 					// Second time we press stop
-					buttonChannel <- ButtonEvent{ButtonType: BUTTON_STOP, Value: false}
-					stopState  = false
+					buttonChannel <- ButtonEvent{ButtonType: typedef.BUTTON_STOP, Value: false}
+					stopState=false
 				}
 
 				
-			} else {
+			} else{
 				stopButton = false
 			}
 		}
@@ -181,40 +173,46 @@ func readButtons(buttonChannel chan<- ButtonEvent, pollingDelay time.Duration){
 }
 
 // This function runs continously as a goroutine, pinging the hardware for floor arrivals.
-func readFloorSensors(floorChannel chan<- FloorEvent, pollingDelay time.Duration) {
-	var lastFloor := -1
-	for {
+func readFloorSensors(floorChannel chan<- FloorEvent, pollingDelay time.Duration){
+	lastFloor := -1
+	for{
 		floor := checkFloor()
-		if (floor != -1) && (floor != lastFloor) {
+		if (floor != -1) && (floor != lastFloor){
 			lastFloor = floor
 			setFloorIndicator(floor)
 			floorChannel <- FloorEvent{Floor: floor} 
 			}	
-		}
 		time.Sleep(pollingDelay)
 	}
 }
 // This function runs continously as a goroutine, waiting for orders to set lights.
 func controlLights(lightChannel <-chan LightEvent){
-	select{
-		case lightEvent:=<-lightChannel:
-			switch lightEvent.LightType{
-			case BUTTON_CALL_UP, BUTTON_CALL_DOWN, BUTTON_COMMAND:
-				setButtonLight(lightEvent.Floor, lightEvent.LightType, lightEvent.Value)
-			case BUTTON_STOP:
-				setStopLamp(lightEvent.Value)
-			case DOOR_LAMP:
-				setDoorLamp(lightEvent.Value)
-			default:
-				// Do some error handling.
-			}
+	for{
+		select{
+			case lightEvent:=<-lightChannel:
+				switch lightEvent.LightType{
+				case typedef.BUTTON_CALL_UP, typedef.BUTTON_CALL_DOWN, typedef.BUTTON_COMMAND:
+					setButtonLight(lightEvent.Floor, lightEvent.LightType, lightEvent.Value)
+				case typedef.BUTTON_STOP:
+					setStopLamp(lightEvent.Value)
+				case typedef.DOOR_LAMP:
+					setDoorLamp(lightEvent.Value)
+				default:
+					// Do some error handling.
+				}
+		}	
 	}
 }
 
 // This function runs continously as a goroutine, waiting for orders to set the motor direction
-func controlMotor(motorChannel<-chan MotorEvent){
-	motorEv :=<-motorChannel
-	setMotorDirection(motorEvent.MotorDirection)
+func controlMotor(motorChannel <-chan int){
+	for {
+		select{
+			case motorEv :=<-motorChannel:
+				fmt.Printf("CONTROLMOTOR:\t Received direction: %d\n", motorEv)
+				setMotorDirection(motorEv)
+		}
+	}
 }
 
 
@@ -225,7 +223,7 @@ func controlMotor(motorChannel<-chan MotorEvent){
 */
 func checkButtonPressed(buttonType, floor int) bool {
 	// TODO -> Do this better in terms of counter variable names and button types. Can this function be removed?
-	if IOReadBit(buttonChannelMatrix[floor][buttonType]){
+	if driver.IOReadBit(buttonChannelMatrix[floor][buttonType]){
 		return true
 	} else {
 		return false
@@ -237,13 +235,13 @@ func checkButtonPressed(buttonType, floor int) bool {
 	given floor to see if the elevator is at that floor.
 */
 func checkFloor() int {
-	if IOReadBit(SENSOR_FLOOR1) {
+	if driver.IOReadBit(SENSOR_FLOOR1) {
 		return 0
-	} else if IOReadBit(SENSOR_FLOOR2) {
+	} else if driver.IOReadBit(SENSOR_FLOOR2) {
 		return 1
-	} else if IOReadBit(SENSOR_FLOOR3) {
+	} else if driver.IOReadBit(SENSOR_FLOOR3) {
 		return 2
-	} else if IOReadBit(SENSOR_FLOOR4) {
+	} else if driver.IOReadBit(SENSOR_FLOOR4) {
 		return 3
 	} else {
 		return -1
@@ -254,14 +252,14 @@ func checkFloor() int {
 	This function checks the status of the stop button
 */
 func checkStopSignal() bool {
-	return IOReadBit(STOP)
+	return driver.IOReadBit(STOP)
 }
 
 /*
 	This function checks the status of the obstruction button/signal
 */
 func checkObstructionSignal() bool {
-	return IOReadBit(OBSTRUCTION)
+	return driver.IOReadBit(OBSTRUCTION)
 }
 
 
@@ -273,14 +271,15 @@ func checkObstructionSignal() bool {
 	immediately).
 */
 func setMotorDirection(direction int) error {
+	fmt.Printf("HARDWARE:\t Setting motor direction: %d\n", direction)
 	if direction == 0 {
-		IOWriteAnalog(MOTOR, 0)
+		driver.IOWriteAnalog(MOTOR, 0)
 	} else if direction > 0 {
-		IOClearBit(MOTORDIR)
-		IOWriteAnalog(MOTOR, motorspeed)
+		driver.IOClearBit(MOTORDIR)
+		driver.IOWriteAnalog(MOTOR, motorspeed)
 	} else if direction < 0 {
-		IOSetBit(MOTORDIR)
-		IOWriteAnalog(MOTOR, motorspeed)
+		driver.IOSetBit(MOTORDIR)
+		driver.IOWriteAnalog(MOTOR, motorspeed)
 	}
 
 	// TODO -> Do some acceptance test to see if the direction was set.
@@ -298,9 +297,9 @@ func setMotorDirection(direction int) error {
 func setButtonLight(floor, buttonType int, value bool) error {
 	// TODO -> Some acceptance test for the arguments..
 	if value {
-		IOSetBit(lightChannelMatrix[floor][buttonType])
+		driver.IOSetBit(lightChannelMatrix[floor][buttonType])
 	} else {
-		IOClearBit(lightChannelMatrix[floor][buttonType])
+		driver.IOClearBit(lightChannelMatrix[floor][buttonType])
 	}
 	return nil
 }
@@ -310,19 +309,19 @@ func setButtonLight(floor, buttonType int, value bool) error {
 */
 func setFloorIndicator(floor int) {
 	// Binary encoding, one light is always on 00, 01, 10 or 11
-	if floor >= N_FLOORS || floor <= 0 {
+	if floor >= typedef.N_FLOORS || floor < 0 {
 		log.Println("HARDWARE:\t Tried to set indicator on invalid floor.")
 		// todo set floor to nearest valid floor.
 	}
 	if bool((floor & 0x02) != 0) {
-		IOSetBit(LIGHT_FLOOR_IND1)
+		driver.IOSetBit(LIGHT_FLOOR_IND1)
 	} else {
-		IOClearBit(LIGHT_FLOOR_IND1)
+		driver.IOClearBit(LIGHT_FLOOR_IND1)
 	}
 	if bool((floor & 0x01) != 0) {
-		IOSetBit(LIGHT_FLOOR_IND2)
+		driver.IOSetBit(LIGHT_FLOOR_IND2)
 	} else {
-		IOClearBit(LIGHT_FLOOR_IND2)
+		driver.IOClearBit(LIGHT_FLOOR_IND2)
 	}
 }
 
@@ -331,9 +330,9 @@ func setFloorIndicator(floor int) {
 */	
 func setDoorLamp(value bool) {
 	if value {
-		IOSetBit(LIGHT_DOOR_OPEN)
+		driver.IOSetBit(LIGHT_DOOR_OPEN)
 	} else {
-		IOClearBit(LIGHT_DOOR_OPEN)
+		driver.IOClearBit(LIGHT_DOOR_OPEN)
 	}
 }
 
@@ -342,21 +341,31 @@ func setDoorLamp(value bool) {
 */
 func setStopLamp(value bool) {
 	if value {
-		IOSetBit(LIGHT_STOP)
+		driver.IOSetBit(LIGHT_STOP)
 	} else {
-		IOClearBit(LIGHT_STOP)
+		driver.IOClearBit(LIGHT_STOP)
 	}
 }
 
 
 func resetLights() {
-	for f:=0;f<N_FLOORS;f++{
-		for b:=BUTTON_CALL_UP;b<N_BUTTONS;b++{
+	for f:=0;f<typedef.N_FLOORS;f++{
+		for b:=typedef.BUTTON_CALL_UP;b<typedef.N_BUTTONS;b++{
 			setButtonLight(f, b, false)
 		}
 	}
 	setStopLamp(false)
 	setDoorLamp(false)
+}
+
+// ----------------  Temporary functions to reset elevator from separate program. ----------------
+
+func ResetLights(){
+	resetLights()
+}
+
+func SetMotorDirection(dir int){
+	setMotorDirection(dir)
 }
 
 

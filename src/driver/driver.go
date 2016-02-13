@@ -1,10 +1,21 @@
 package driver
 
 /*
+	Need to implement the driver source. These files are C code. 
+	Go recognices the 'import' statement within the comment and lets
+	us reference the functions in the interface of the C code in the
+	Go source code. The 'import "C" ' statement is a 'pseudo package' which
+	let cgo recognise the C namespace. 
+	The 'import "unsafe" ' is needed because the memory allocations made by
+	C are not known to the Go memory manager. When C creates a string or such,
+	we need to free this by calling C.free
+*/
+
+
+/*
+#cgo LDFLAGS: -lpthread -lcomedi -lcomedi -lm
 #cgo CFLAGS: -std=c99
-#cgo LDFLAGS: -lpthread -lcomedi -lm
 #include "io.h"
-#include "channels.h"
 */
 import "C"
 import "errors"

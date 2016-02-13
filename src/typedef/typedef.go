@@ -7,9 +7,9 @@ const N_BUTTONS int = 3
 // --------------------- "Enumerators" --------------------
 
 const(
-	DIR_DOWN int = -1 << iota 
-	DIR_STOP
-	DIR_UP
+	DIR_DOWN  = -1
+	DIR_STOP = 0
+	DIR_UP = 1
 )
 
 // Enumerators
