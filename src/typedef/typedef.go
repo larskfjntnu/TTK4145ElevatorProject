@@ -3,33 +3,11 @@ package typedef
 const N_FLOORS int = 4 // TODO -> Do this dynamically.
 const N_BUTTONS int = 3
 
-// --------------- EVENT STRUCTS -----------------
-type ButtonEvent struct{
-	ButtonType int
-	Floor int
-}
-
-type LightEvent struct{
-	LightType int
-	Floor int
-	Value bool
-}
-
-type MotorEvent struct{
-	MotorDirection Direction
-}
-
-type FloorEvent struct{
-	CurrentDirection Direction
-	Floor int
-}
-
 
 // --------------------- "Enumerators" --------------------
 
-type Direction int 
 const(
-	DIR_DOWN Direction = -1 << iota 
+	DIR_DOWN int = -1 << iota 
 	DIR_STOP
 	DIR_UP
 )
@@ -45,3 +23,26 @@ const (
 	OBSTRUCTION_SENS
 	DOOR_LAMP
 )
+
+// Events
+const(
+	EventNotifyAlive = iota
+	EventBackup
+	EventRequestState
+	EventReturnRestoredState
+	EventNewOrder
+	EventConfirmOrder
+	EventAcknowledgeConfirmedOrder
+	EventOrderDone
+	EventAcknowledgeOrderDone
+	EventReassignOrder
+)
+
+// Order status
+const (
+	InActive = iota
+	Waiting
+	Executing
+)
+
+
