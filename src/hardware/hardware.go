@@ -81,50 +81,53 @@ const motorspeed = 2800
 //		-----------------------  FUNCTdriver.ION DECLERATdriver.IONS    -----------------------------------
 
 
-func Init(buttonChannel chan<- ButtonEvent, lightChannel <-chan LightEvent, motorChannel <-chan int, floorChannel chan<- FloorEvent, pollingDelay time.Duration) error{
+func Init(buttonChannel chan<- ButtonEvent, lightChannel <-chan LightEvent, motorChannel <-chan int, floorChannel chan<- FloorEvent, DelayInPolling time.Duration) error{
 	if initialized{
 		return fmt.Errorf("Hardware is already initialized.")
 	}
 	initSuccess := driver.IOInit()
-	if initSuccess!=nil{
+	if initSuccess!=nil {
 		return fmt.Errorf("Unable to initialize hardware.")
 	}
 	resetLights()
 
+	// Start goroutines to handle lights and motors.
+	go controlLights(lightChannel)
+	go controlMotor(motorChannel)
+
 	setMotorDirection(typedef.DIR_STOP)
 	// If initialized between floors, move down to nearest floor.
 	if checkFloor() == -1 {
-		fmt.Printf("HARDWARE:\t Starting between floors, going down.\n")
+		printDebug("Starting between floors, going down")
 		setMotorDirection(typedef.DIR_DOWN)
 		for {
 			if floor:= checkFloor(); floor != -1 {
-				fmt.Printf("HARDWARE:\t INIT -> Arrived at floor: %d\n", floor)
+				printDebug("INIT -> Arrived at floor: " + floor.String())
 				setMotorDirection(typedef.DIR_STOP)
 				floorChannel <- FloorEvent{CurrentDirection: typedef.DIR_STOP, Floor: floor}
 				break
 			} else {
-				time.Sleep(pollingDelay)
+				time.Sleep(DelayInPolling)
 			}
 		}
 	}
 
-	// Start goroutines to handle hardware events.
-	go controlLights(lightChannel)
-	go controlMotor(motorChannel)
-	go readButtons(buttonChannel, pollingDelay)
-	go readFloorSensors(floorChannel, pollingDelay)
+	// Start goroutines to handle polling hardware
+	go readButtons(buttonChannel, DelayInPolling)
+	go readFloorSensors(floorChannel, DelayInPolling)
 	return nil
 	// TODO -> Acceptance test!!!
 }
 
 
 // This function runs continously as a goroutine, pinging the hardware for button presses.
-func readButtons(buttonChannel chan<- ButtonEvent, pollingDelay time.Duration){
+func readButtons(buttonChannel chan<- ButtonEvent, DelayInPolling time.Duration){
 	readingMatrix := [typedef.N_FLOORS][typedef.N_BUTTONS]bool{}
 	var stopButton bool = false
 	var stopState bool = false
 	var obstructionSignal = false
-	// This while loop runs continously, pinging the hardware for button presses.
+
+	// This while loop runs continously, polling the hardware for button presses.
 	for {
 		// Check if there are any new orders(buttons pressed).
 		for floor := 0; floor < typedef.N_FLOORS; floor ++ {
@@ -168,12 +171,12 @@ func readButtons(buttonChannel chan<- ButtonEvent, pollingDelay time.Duration){
 				obstructionSignal = false
 			}
 		}
-		time.Sleep(pollingDelay)
+		time.Sleep(DelayInPolling)
 	}
 }
 
 // This function runs continously as a goroutine, pinging the hardware for floor arrivals.
-func readFloorSensors(floorChannel chan<- FloorEvent, pollingDelay time.Duration){
+func readFloorSensors(floorChannel chan<- FloorEvent, DelayInPolling time.Duration){
 	lastFloor := -1
 	for{
 		floor := checkFloor()
@@ -182,7 +185,7 @@ func readFloorSensors(floorChannel chan<- FloorEvent, pollingDelay time.Duration
 			setFloorIndicator(floor)
 			floorChannel <- FloorEvent{Floor: floor} 
 			}	
-		time.Sleep(pollingDelay)
+		time.Sleep(DelayInPolling)
 	}
 }
 // This function runs continously as a goroutine, waiting for orders to set lights.
@@ -205,6 +208,7 @@ func controlLights(lightChannel <-chan LightEvent){
 }
 
 // This function runs continously as a goroutine, waiting for orders to set the motor direction
+// TODO ->  Does this need to be goroutine? could we just call setMotorDirection directly?
 func controlMotor(motorChannel <-chan int){
 	for {
 		select{
@@ -271,7 +275,7 @@ func checkObstructionSignal() bool {
 	immediately).
 */
 func setMotorDirection(direction int) error {
-	fmt.Printf("HARDWARE:\t Setting motor direction: %d\n", direction)
+	printDebug("Setting motor direction: " + direction)
 	if direction == 0 {
 		driver.IOWriteAnalog(MOTOR, 0)
 	} else if direction > 0 {
@@ -368,6 +372,12 @@ func SetMotorDirection(dir int){
 	setMotorDirection(dir)
 }
 
+
+func printDebug(message string){
+	if debug{
+		log.Println("Hardware:\t message")
+	}
+}
 
 
 

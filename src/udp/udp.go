@@ -8,121 +8,114 @@ package udp
 */
 
 import (
-	"log"
+	"fmt"
 	"net"
 	"strconv"
 )
 
-const debug = false
-const udp4 = "udp4"
-const broadcastIp = "255.255.255.255:"
+const debug = true
 
-// The adresses used for communicating and broadcast.
-var localAddress *net.UDPAddr
-var broadcastAdress *net.UDPAddr
-
-// The struct for the messages that are being sendt or received.
-type UDPMessage struct {
-	RAddress string // "broadcast" or some ip address. Return adress when received(the address to return to), receive address when sending(the address which is receiving.)
-	Data     []byte // The data of the sendt or received package(serialized JSON)
-	Length   int    // Lengt of the received data, in bytes. N/A for sending.
+type UDPMessage struct{
+	RAddress string // "broadcast" or specific ip.
+	Data []byte
+	Length int // Length of the received data packet, number of bytes, nil for sending
 }
 
 /*
-	This function initializes the UDP module. It sets the port for listening, broadcasting, the approved message size and the channels
-	for communicating with the calling module. It returns the local IP-address of this system/module, and an error if if it fails(then ip is "").
+	This function initialized the  broadcast-  and local connection. It uses a temporary connection to resolve the
+	local address of the host. It then starts to go routines acting as servers handling receving transmissions
+	and sending messages respectively. It returns the local IP address of the host, or an error message
+	if any. It takes in all the necessary channels (send and receive) from its calling routine, enabling
+	interaction between the servers and other routines in the program.
 */
-func Init(localListenPort, broadcastListenPort, messageSize int, sendChannel <-chan UDPMessage, receiveChannel chan<- UDPMessage) (localIP string, err error) {
-
+func Init(localListenPort, broadcastListenPort, messageSize int, sendChannel <- chan UDPMessage, receiveChannel chan<- UDPMessage) (localIp string, err error{
 	// Generate broadcast address
-	broadcastAdress, err = net.ResolveUDPAddr(udp4, broadcastIp+strconv.Itoa(broadcastListenPort))
-	if err != nil {
-		log.Println("UDP:\t Could not resolve UDPAddress.")
+	bcAddr, err = net.ResolveUDPAddr("udp4", "255.255.255.255:" + strconv.Itoa(broadcastListenPort))
+	if err != nil {
+		printDebug("Error resolving UDPAddress")
 		return "", err
-	} else if debug {
-		// We are in debug mode.
-		log.Printf("UDP:\t Generating broadcast address:\t %s \n", broadcastAdress.String())
+	} else 
+		printDebug("Generated broadcast address: " + bcAddr.String)
 	}
 
-	// Generate local address, uses the tempConnection to fetch address via the UDP dial.
-	tempConnection, err := net.DialUDP(udp4, nil, broadcastAdress)
+	// Generate localaddress
+	tempCon, err := net.DialUDP("udp4", nil, bcAddr)
 	if err != nil {
-		log.Println("UDP:\t No network connection")
+		printDebug("No network connection.")
 		return "", err
-	}
-	defer tempConnection.Close() // Makes sure the connection is closed when Init completes.
-	tempAddress := tempConnection.LocalAddr()
-	localAddress, err = net.ResolveUDPAddr(udp4, tempAddress.String())
-	if err != nil {
-		log.Println("UDP:\t Could not resolve local address.")
-		return "", err
-	} else if debug {
-		log.Printf("UDP:\t Generating local address: \t%s \n", localAddress.String())
-	}
-	localAddress.Port = localListenPort // Set the port property of the *net.UDPAddr struct
-
-	// Create local listening connections
-	localListenConnection, err := net.ListenUDP(udp4, localAddress) // Listens for incoming UDP packets addressed to localAddress.
-	if err != nil {
-		log.Println("UDP:\t Couldn't create a UDP listener socket.")
-		return "", err
-	}
-	if debug {
-		log.Println("UDP:\t Created a UDP listener socket.")
+	} else {
+		defer tempCon.Close()
 	}
 
-	// Create a listener on broadcast connection.
-	broadcastListenConnection, err := net.ListenUDP(udp4, &net.UDPAddr{IP: net.IPv4(0, 0, 0, 0), Port: broadcastListenPort})
+	tempAddr := tempCon.LocalAddr()
+	locAddr, err = net.ResolveUDPAddr("udp4", tempAddr.String())
 	if err != nil {
-		log.Println("UDP:\t Could not create a UDP broadcast listen socket.")
-		localListenConnection.Close()
+		printDebug("Could not resolve local address")
 		return "", err
+	} else {
+		printDebug("Generated local address: " + locAddr.String())
 	}
-	if debug {
-		log.Println("UDP:\t Created a UDP broadcast listen socket.")
+	locAddr.Port = localListenPort
+
+
+	// Generate local listening connections.
+	localListenCon, err := net.ListenUDP("udp4", locAddr)
+	if err != nil {
+		printDebug("Could not create a UDP listener socket")
+		return "", err
+	} else {
+		printDebug("Create UDP listener socket")
 	}
-	// Start goroutines to handle incoming messages and sending outgoing messages.
-	go udpReceiveServer(localListenConnection, broadcastListenConnection, messageSize, receiveChannel)
-	go udpTransmitServer(localListenConnection, broadcastListenConnection, localListenPort, broadcastListenPort, sendChannel)
-	return localAddress.IP.String(), err
+
+	// Generate listener on broadcast connection
+	bcListenCon, err = net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(0, 0, 0, 0), Port: broadcastListenPort})
+	if err != nil {
+		printDebug("Could not create a UDP broadcast listen socket")
+		localListenCon.close()
+		return "", err
+	} else {
+		printDebug("Created a UDP broadcast listen socket")
+	}
+
+	go udpReceiveServer(localListenCon, bcListenCon, messageSize, receiveChannel)
+	go udpTransmitServer(localListenCon, bcListenCon, localListenPort, broadcastListenPort, sendChannel)
+	return locAddr.IP.String(), err
 }
 
 /*
-	This function is called as a goroutine and acts as a server used for sending UDP packets. It receives the packets to send via
-	the sendChannel, and runs an infinite loop waiting for messages to send.
+	This functions is run as a go routine acting as a server for handling the sending/transmission
+	of messages in the form of an UDPMessage(struct). It communicates with other routines through a 
+	channel(sendChannel) where it receives UDPMessages to send.
 */
-func udpTransmitServer(localConnection, broadcastConnection *net.UDPConn, localListenPort, broadcastListenPort int, sendChannel <-chan UDPMessage) {
+func udpTransmitServer(loccon, bccon *net.UDPConn, localListenPort, bcListenPort int, sendChannel <-chan UDPMessage) {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Printf("UDPConnectionReader:\t Error in UDPTransmitServer: %s \n Closing connection.", r)
-			localConnection.Close()
-			broadcastConnection.Close()
+			printDebug("Error in udpTransmitServer: " + r + "\nClosing connection")
+			loccon.Close()
+			bccon.Close()
 		}
 	}()
-	for {
-		if debug {
-			log.Println("UDPTransmitServer:\t Waiting on new value on sendChannel.")
-		}
-		select { // Waits for something to happen on the sendChannel
-		case msg := <-sendChannel:
-			if debug {
-				log.Println("UDPTransmitServer:\t Start sending an ElevState package to: ", msg.RAddress)
-				log.Println("UDP-Send:\t", string(msg.Data))
-			}
-			if msg.RAddress == "broadcast" { // Broadcast the message
-				bytesSended, err := localConnection.WriteToUDP(msg.Data, broadcastAdress)
-				if (err != nil || bytesSended < 0) && debug {
-					log.Println("UDPTransmitServer:\t Error ending broadcast message.")
-					log.Println(err)
+
+	for {
+		select{
+		case message <- sendChannel:
+			printDebug("TransmitServer :\t Start sending a state package to: " + message.RAddress)
+			printDebug("Send: \t" + string(msg.Data))
+
+			if msg.RAddress == "broadcast" {
+				n, err := loccon.WriteToUDP(msg.Data, bcAddr)
+				if (err != nil || n < 0) {
+					printDebug(Error ending broadcast message)
+					log.Printl(err)
 				}
-			} else { // Send the message to the localConnection. p2p
-				returnAddress, err := net.ResolveUDPAddr("udp", msg.RAddress)
+			} else {
+				raddr err := net.ResolveUDPAddr("udp4", msg.RAddress + ":" + strconv.Itoa(localListenPort))
 				if err != nil {
-					log.Println("UDPTransmitServer:\t Could not resolve return address.")
+					printDebug("TransmitServer:\t Could not resolve RAddress")
 					log.Fatal(err)
 				}
-				if n, err := localConnection.WriteToUDP(msg.Data, returnAddress); err != nil || n < 0 {
-					log.Printf("UDPTransmiServer:\t Error: Sending p2p message.")
+				if n, err := lconn.WriteToUDP(msg.Data, raddr); err != nil || n < 0 {
+					printDebug("TransmitServer:\t Error sending p2p message")
 					log.Println(err)
 				}
 			}
@@ -131,59 +124,70 @@ func udpTransmitServer(localConnection, broadcastConnection *net.UDPConn, localL
 }
 
 /*
-	This function is called as a goroutine and acts as a server used for receiving UDP packets. It sends the packets received via
-	the receiveChannel. It starts two goroutines used for listening on connections and broadcasts for incoming UDP packets.
-	These are then sendt via two different channels to the ReceiveServer, depending on the incoming message type(p2p or broadcast.)
+	This functions is run as a go routine acting as a server for handling the receiving
+	of messages in the form of an UDPMessage(struct). It communicates with other routines through a 
+	channel(receiveChannel) where it sends UDPMessages it has received. It starts two goroutines
+	responsible for handling incoming messages through broadcasts and p2p respectively. The receiveServer
+	communicates with these routines through two locally created channels where UDPMessages are being sent.
 */
-func udpReceiveServer(localConnection, broadcastConnection *net.UDPConn, messageSize int, receiveChannel chan<- UDPMessage) {
-	defer func() {
+
+func udpReceiveServer(loccon, bccon *net.UDPConn, messageSize int, receiveChannel chan<- UDPMessage) {
+	defer func(){
 		if r := recover(); r != nil {
-			log.Println("UDP:\t ERROR in UDPReceiveServer: %s \n Closing connection.", r)
-			localConnection.Close()
-			broadcastConnection.Close()
+			printDebug("Error in udpReceiveServer: " + r + " Closing connection")
+			loccon.Close()
+			bccon.Close()
 		}
 	}()
-	broadcastConnectionReceiveChannel := make(chan UDPMessage)
-	localConnectionReceiveChannel := make(chan UDPMessage)
-	// Run the goroutines.
-	go udpConnectionReader(localConnection, messageSize, localConnectionReceiveChannel)
-	go udpConnectionReader(broadcastConnection, messageSize, broadcastConnectionReceiveChannel)
-	for {
-		select { // Wait for messages from the above goroutines.
-		case message := <-broadcastConnectionReceiveChannel:
+
+	bcconRcvCh := make(chan UDPMessage)
+	locconRcvCh := make(chan UDPMessage)
+	go udpConnectionReader(loccon, messageSize, locconRcvCh)
+	go udpConnectionReader(bccon, messageSize, bcconRcvCh)
+
+	for{
+		select{
+		case message := <- bcconRcvCh:
 			receiveChannel <- message
-		case message := <-localConnectionReceiveChannel:
+		case message := <- locconRcvCh:
 			receiveChannel <- message
 		}
 	}
 }
 
 /*
-	Used to listen for incoming UDP packets on  an given connection. Runs an infinite loop reading from the connection to a buffer.
-	When a message is complete, it sends it to to the caller via the receive channel.
+	This function is run as a goroutine reading incoming connections on the given connection(conn).
+	It verifies that the received message is valid before passing it to the calling routine through a channel(rcvCh)
+	where the message is passed as a UDPMessage.
 */
-func udpConnectionReader(connection *net.UDPConn, messageSize int, receiveChannel chan<- UDPMessage) {
-	defer func() {
-		if r := recover(); r != nil {
-			log.Println("UDPConnectionReader:\t ERROR in udpConnectionReader:\t %s \n Closig connection.", r)
-			connection.Close()
-		}
+
+func udpConnectionReader(conn *net.UDPConn, messageSize int, rcvCh chan<- UDPMessage) {
+	defer func(){
+		if r := recover(); r != nil {
+			printDebug("ConnectionReader:\t Error in connectionReader: " + r + "\nClosing connection")
+			conn.Close()
+		} 
 	}()
 
 	for {
-		if debug {
-			log.Printf("UDPConnectionReader:\t Waiting on data from UDPConnection %s\n", connection.LocalAddr().String())
-		}
-		buffer := make([]byte, messageSize) // TODO: Do without allocation memory each time!
-		n, returnAddress, err := connection.ReadFromUDP(buffer)
-		if err != nil || n < 0 || n > messageSize {
-			log.Println("UDPConnectionReader:\t Error in ReadFromUDP:", err)
+		buffer := make([]byte, messageSize)
+		n, raddr, err = conn.ReadFromUDP(buffer)
+		if err != null || n < 0 || n > messageSize {
+			printDebug("Error in ReadFromUDP" + err)
 		} else {
-			if debug {
-				log.Println("UDPConnectionReader:\t Received package from:", returnAddress.String())
-				log.Println("UDP-Listen:\t", string(buffer[:]))
-			}
-			receiveChannel <- UDPMessage{RAddress: returnAddress.String(), Data: buffer[:n], Length: n}
+			printDebug("ConnectionReader:\t Received package from: " + raddr.String())
+			printDebug("Listen:\t" + string(buffer[:]))
+			rcvCh <- UDPMessage{RAddress: raddr.String(), Data: buf[:n], Length: n}
 		}
+	}
+}
+
+
+/*
+	Helper function for debug messages.
+*/
+func printDebug(message string){
+	if debug{
+		log.Println("UDP:\t" + message)
 	}
 }
