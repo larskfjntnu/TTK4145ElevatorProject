@@ -13,7 +13,7 @@ package CostFunction
 	to go as arguments and calculates the optimal (at least we hope it does)
 	elevator to respond to the call.
 */
-func calculateRespondingElevator(floor, direction int) (elevator int) {
+func calculateRespondingElevator(knownElevators map[string]*Elevator, activeElevators []string) (assignedTo string, floor, type int) {
 	// TODO -> Implement some algorithm to calculate the optimal elevator
 
 }

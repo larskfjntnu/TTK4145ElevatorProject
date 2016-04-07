@@ -19,99 +19,258 @@ package somepackage
 import (
 	"fmt"
 	"time"
-	"./src/udp"
+	"udp"
+	"hardware"
+	"time"
+	"network"
+	. "./src/typedef"
 )
-const sending = false
 
-// const debug = true
-// const broadcast = true
+func main() {
 
-// // This function starts the program. The while loop inside runs throughout
-// // the lifetime of the program.
-// func main() {
-// 	// Do some initialization. Determine wether Master or slave/client.
-// 	runtime.GOMAXPROCS(runtime.NumCPU())
-// 	const connectionAttempsLimit = 10
-// 	const iAmAliveTickTime = 100 * time.Millisecond
-// 	const ackTimeout = 500 * time.Millisecond
+	const delayInPolling = 50 * time.Milliseconds
+	const attemptToConnectLimit = 5
+	const elevOnlineTick = 100 * time.Millisecond
+	const elevOnlineLimit = 3 * elevOnlineTick + 10*time.Millisecond
+	const timeOutAcknowledge = 500 * time.Millisecond
+	const doorOpentime = 500 * time.Millisecond
+	var localIP string
+	var externalOrders [N_FLOORS][2] ElevOrder
+	var knownElevators = make(map[string]*Elevator) // IP address is key
+	var activeElevators = make(map[string]bool) // IP address is key
 
-// 	//	------------- Initialize network ----------------
-// 	receiveChannel := make(chan typedef.SomeStructToPassOnNetwork, 5)
-// 	sendChannel := make(chan typedef.SomeStructToPassOnNetwork)
-// 	localIP, err := initNetwork(connectionAttempsLimit, receiveChannel, sendChannel)
-// 	if err != nil {
-// 		log.Println("MAIN:\t Network init failed")
-// 		log.Fatal(err)
-// 	} else if debug {
-// 		log.Println("MAIN:\t Network init succesful")
-// 		log.Printf("MAIN:\t LocalIp:\t %s\n", localIP)
-// 	}
-// 	if broadcast {
-// 		sendChannel <- typedef.SomeStructToPassOnNetwork{
-// 			Message:  "Hi, i'm broadcasting!",
-// 			SenderIp: localIP,
-// 		}
-// 	}
 
-// 	// This is the main loop running continuously.
-// 	for {
-// 		// TODO -> Implement the main logic of the elevator.
-// 		select {
-// 		case message := <-receiveChannel:
-// 			log.Println("MAIN:\t Received message!")
-// 			log.Println(message.Message)
-// 		}
-// 	}
-// }
+	// Initializing hardware
+	printDebug("Starting main loop")
+	buttonChannel := make(chan hardware.ButtonEvent)
+	lightChannel := make(chan hardware.LightEvent)
+	motorChannel := make(chan int)
+	floorChannel := make(chan int)
+	if err := hardware.Init(buttonChannel, lightChannel, floorChannel, motorChannel, delayInPolling); err != nil {
+		printDebug("Hardware Initializing failed")
+		log.Fatal(err)
+	} else {
+		printDebug("Hardware Initializing successful")
+	}
 
-// func initNetwork(connectionAttempsLimit int, receiveChannel, sendChannel chan typedef.SomeStructToPassOnNetwork) (localIP string, err error) {
-// 	for i := 0; i <= connectionAttempsLimit; i++ {
-// 		localIP, err := network.Init(receiveChannel, sendChannel)
-// 		if err != nil {
-// 			if i == 0 {
-// 				log.Println("MAIN:\t Network init was not successfull. Trying some more times.")
-// 			} else if i == connectionAttempsLimit {
-// 				return "", err
-// 			}
-// 			time.Sleep(3 * time.Second)
-// 		} else {
-// 			return localIP, nil
-// 		}
-// 	}
-// 	return "", nil
-// }
+	// Initializing network
+	receiveOrderChannel := make(chan OrderStruct, 5)
+	sendOrderChannel := make(chan OrderStruct)
+	receiveRecoveryChannel := make(chan BackupStruct, 5)
+	sendRecoveryChannel := make(chan BackupStruct)
 
-func print_udp_message(msg udp.UDPMessage){
-	fmt.Printf("msg:  \n \t raddr = %s \n \t data = %s \n \t length = %v \n", msg.RAddress, msg.Data, msg.Length)
+	localIP, err := networkInit(attemptToConnectLimit, receiveOrderChannel, sendOrderChannel, receiveRecoveryChannel, sendRecoveryChannel)
+	if err != nil {
+		printDebug("network Initializing failed")
+		log.Fatal(err)
+	} else {
+		printDebug("Network Initializing successful")
+	}
+
+	// Initializing state
+	printDebug("Requesting previous state")
+	sendRecoveryChannel <- BackupStruct{
+		RequesterIP: localIP
+		Event: EventRequestState
+	}
+	knownElevators[localIP] = makeElevatorStruct(StateStruct{LocalIP: localIP, PrevFloor: <- floorChannel})
+	setActiveElevators(knownElevators, activeElevators, localIP, elevOnlineLimit)
+	printDebug("Finished initializing state, starting from floor: " knownElevators[localIP].State.LastFloor)
+
+
+	// Initializing timers
+	checkIfOnlineTicker := time.NewTicker(elevOnlineLimit)
+	defer checkIfOnlineTicker.Stop()
+	confirmOnlineTicker := time.NewTicker(elevOnlineTick)
+	defer confirmOnlineTicker.Stop()
+	doorTimer := time.NewTimer(time.Second)
+	doorTimer.Stop()
+	defer doorTimer.Stop()
+	timeoutChannel := make(chan fullOrderStruct)
+	printDebug("Ticker and timer initializing successful")
+
+	// Main loop
+	printDebug("Starting main loop")
+	printDebug("\n\n\n")
+
+	for{
+
+		// Events happen in this select case
+		select{
+
+		//Hardware events
+		case buttonEvent := <- buttonChannel:
+			printDebug("Received a " + BUttonType[buttonEvent.type] + " from floor " + button.Floor + ". " + activeElevators.len() + " active elevators.")
+			// A button is pressed
+			switch button.Type{
+				// External order
+				case: BUTTON_CALL_UP, BUTTON_CALL_DOWN:
+					if _, ok := activeElevators[localIP]; !ok {
+						printDebug("Cannot accept external order while offline.")
+					} else {
+						// Do something with the order.
+						if assignedIP, err := CostFunction.AssignNewOrder(knownElevators, activeElevators, button.Floor, button.Type); err != nil {
+							log.Fatal(err)
+						} else {
+							sendOrderChannel <- OrderStruct{SendTo: assignedIP,
+															SentFrom: localIP,
+															Event: EventNewOrder,
+															Floor: button.Floor,
+															ButtonType: button.Type,
+															}
+						}
+					}
+				// Internal order
+				case: BUTTON_COMMAND:
+					if !knownElevators[localIP].State.IsMoving && knownElevators[localIP].State.LastFloor == button.Floor {
+						// We are at a standstill at this floor
+						var lightEvent := hardware.LightEvent{Type: DOOR_INDICATOR, Value: true}
+						printDebug("Opening door")
+						doorTimer.Reset(doorOpentime)
+						knownElevators[localIP].State.OpenDoor = true
+						var backupState := MakeBackupState(knownElevators[localIP], externalOrders)
+					} else {
+						printDebug("Internal order added to queue")
+						knownElevators[localIP].SetInternalOrder(button.Floor)
+						var backupState := MakeBackupState(knownElevators[localIP], externalOrders)
+						var lightEvent := hardware.LightEvent{Type: button.Type, Floor: button.Floor, Value: true}
+						if knownElevators[localIP].IsIdle() && !knownElevators[localIP].State.OpenDoor {
+							doorTimer.Reset(0*time.Millisecond)
+						}
+					}
+					lightChannel <- lightEvent
+					sendRecoveryChannel <- backupState
+				// Stop button pressed
+				case BUTTON_STOP:
+					motorChannel <- STOP
+					lightChannel <- hardware.LightEvent{Type: BUTTON_STOP, Value: true}
+					printDebug('\n\n\n')
+					printDebug('Elevator was killed\n\n\n')
+					time.Sleep(300*time.Millisecond)
+					os.Exit(1)
+				default:
+					printDebug('Received button event from the hardware module')
+			}
+		case floorEvent := <-floorChannel:
+			// Reached a floor
+			printDebug("Reached floor: " + floorEvent.Floor)
+			knownElevators[localIP].LastFloor = floor
+			if knownElevators[localIP].ShouldStop(){
+				// We are stopping at this floor
+				motorChannel <- STOP
+				knownElevators[localIP].SetMoving(false)
+				printDebug("Opening doors")
+				doorTimer.Reset(doorOpentime)
+				lightChannel <- hardware.LightEvent{Type: DOOR_INDICATOR, Value: true}
+				knownElevators[localIP].InternalOrders[floorEvent.Floor] = false
+				lightChannel <- hardware.LightEvent{Floor: floor, Type: BUTTON_COMMAND, Value: false}
+				if floorEvent.CurrentDirection == DIR_DOWN { 
+					knownElevators[localIP].externalOrders[floorEvent.floor][0] = 0
+					lightChannel <- hardware.LightEvent{Floor: floor, Type: BUTTON_CALL_DOWN, Value: false}
+				} else if floorEvent.CurrentDirection == DIR_UP {
+					knownElevators[localIP].externalOrders[floorEvent.floor][1] = 0
+					lightChannel <- hardware.LightEvent{Floor: floor, Type: BUTTON_CALL_UP, Value: false}
+				}
+			}
+
+		// Orders
+
+		case order := receiveOrderChannel:
+			printDebug("Received an " + EventType[order.Event] + " from " + order.SentFrom)
+
+			switch order.Event {
+			case EventNewOrder:
+				printDebug("Order " + ButtonType[order.ButtonType] + " on floor " + strconv.Itoa(order.Floor))
+				knownElevators[localIP].State.ExternalOrders[]
+
+
+			case EventConfirmOrder:
+
+			case EventAcknowledgeConfirmedOrder:
+
+			case EventOrderDone:
+
+			case EventAcknowledgeOrderDone:
+
+			}
+
+
+
+
+
+
+
+		// Timers
+		case <- confirmOnlineTicker.C:
+			sendRecoveryChannel <- MakeBackupMessage(knownElevators[localIP])
+
+		case <- checkIfOnlineTicker.C:
+			setActiveElevators(knownElevators, activeElevators, localIP, timeoutLimit)
+
+		case <- doorTimer.C:
+			printDebug("EventDoorTimeout")
+			printDebug("Closing door ")
+			knownElevators[localIP].State.OpenDoor = false
+			lightChannel <- hardware.LightEvent{LightType: DOOR_LAMP, Value: false}
+
+			// Check if we should start to move
+			if knownElevators[localIP].State.HaveOrders(){
+				knownElevators[localIP].SetDirection(knownElevators[localIP].GetNextDirection())
+				knownElevators[localIP].SetMoving(knownElevators[localIP].State.Direction != DIR_STOP)
+				printDebug("Have orders to execute")
+				printDebug("Going " + MotorDirections[knownElevators[localIP].State.Direction + 1])
+				lightChannel <- hardware.LightEvent(Floor: knownElevators[localIP].State.LastFloor, LightType: BUTTON_COMMAND, Value: false)
+				motorChannel <- knownElevators[localIP].State.Direction
+			} else {
+				printDebug("Nothing to do")
+				knownElevators[localIP].SetMoving(false)
+				knownElevators[localIP].SetDirection(DIR_STOP)
+			}
+			sendRecoveryChannel <- MakeBackupMessage(knownElevators[localIP])
+		}
+	}
 }
 
-func node (send_ch, receive_ch chan udp.UDPMessage){
-for {
-	time.Sleep(1*time.Second)
-	snd_msg := udp.UDPMessage{RAddress:"broadcast", Data:[]byte("Hello World"), Length:11}
-	if sending {
-		fmt.Printf("Sending------\n")
-		send_ch <- snd_msg
-		print_udp_message(snd_msg)
+func networkInit(attemptToConnectLimit int, receiveOrderChannel, sendOrderChannel chan OrderStruct, receiveRecoveryChannel, sendRecoveryChannel chan StateStruct, timeoutLimit time.Duration){
+	for i := 0; i <= attemptToConnectLimit: i++ {
+		localIP, err := network.Init(receiveOrderChannel, sendOrderChannel, receiveRecoveryChannel, sendRecoveryChannel)
+		if err != nil {
+			if i == 0 {
+				printDebug("Failed network Initializing, trying " + (attemptToConnectLimit - i).string() +" more times.")
+			} else if i == attemptToConnectLimit {
+				return "", err
+			}
+			time.Sleep(2*time.Second)
+		} else {
+			return localIP, nil
+		}
 	}
-	fmt.Printf("Receiving----\n")
-	rcv_msg:= <- receive_ch
-	print_udp_message(rcv_msg)
+	return "", nil
+}
+
+func setActiveElevators(knownElevators map[string]*ElevatorStruct, activeElevators map[string]bool, localIP string){
+	for key := range knownElevators{
+		if time.Since(knownElevators[key].Time) =< timeoutLimit {
+			if activeElevators[key] != true {
+				activeElevators[key] = true
+				printDebug("Added elevator " + knownElevators[key].State.LocalIP)
+			}
+		} else {
+			if activeElevators[key] == true {
+				printDebug("Removing elevator " + knownElevators[key].State.LocalIP + " from active elevators")
+				delete(activeElevators, key)
+			}
+		}
 	}
 }
 
 
-func main (){
-	send_ch := make (chan udp.UDPMessage)
-	receive_ch := make (chan udp.UDPMessage)
-	_, err := udp.Init(20001, 20002, 1024, send_ch, receive_ch)	
-	go node(send_ch, receive_ch)
 
-
-	if (err != nil){
-		fmt.Print("main done. err = %s \n", err)
+/*
+	Helper function for debuggin
+*/
+func printDebug(message string){
+	if debug{
+		log.Println("Main:\t message")
 	}
-		neverReturn := make (chan int)
-	<-neverReturn
-
 }

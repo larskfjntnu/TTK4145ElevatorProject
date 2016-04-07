@@ -11,7 +11,7 @@ package network
 import (
 	"encoding/json"
 	"log"
-	. "../typedef"
+	. "./src/typedef"
 	"../udp"
 )
 
@@ -24,8 +24,8 @@ const debug = false
 	It sets the hardcoded ports for listening and broadcast ports, and makes two corresponding UDPMessage channels
 	for sending and receiving. It calls the init function from the udp module to set up the udp connection.
 */
-func Init(receiveOrderChannel chan <- OrderStruct, receiveChannel chan<- StateStruct,
-	sendOrderChannel <-chan OrderStruct, sendChannel <-chan StateStruct) (localIP string, err error) {
+func Init(receiveOrderChannel chan <- OrderStruct, receiveChannel chan<- BackupStruct,
+	sendOrderChannel <-chan OrderStruct, sendChannel <-chan BackupStruct) (localIP string, err error) {
 	const messageSize = 4 * 1024
 	const UDPLocalListenPort = 22301
 	const UDPBroadcastListenPort = 22302
@@ -48,7 +48,7 @@ func Init(receiveOrderChannel chan <- OrderStruct, receiveChannel chan<- StateSt
 	to the main module.(Make generic interface which supports extracting received messages.)
 	The receive channel is where these messages are passed to the calling module.
 */
-func receiveMessageHandler(receiveOrderChannel chan<- OrderStruct, receiveChannel chan<- StateStruct, UDPReceiveChannel <-chan udp.UDPMessage) {
+func receiveMessageHandler(receiveOrderChannel chan<- OrderStruct, receiveChannel chan<- BackupStruct, UDPReceiveChannel <-chan udp.UDPMessage) {
 	for {
 		select {
 		case message := <-UDPReceiveChannel:
@@ -94,7 +94,7 @@ func receiveMessageHandler(receiveOrderChannel chan<- OrderStruct, receiveChanne
 	It takes in the sendChannel initialized in the calling module and the UDPSendChannel declared in 
 	this modules Init function. We send the message in JSON format and prints an error if the marshaling failed.
 */
-func sendMessageHandler(sendOrderChannel <-chan OrderStruct, sendChannel <-chan SomeStructToPassOnNetwork, UDPSendChannel chan<- udp.UDPMessage) {
+func sendMessageHandler(sendOrderChannel <-chan OrderStruct, sendChannel <-chan BackupStruct, UDPSendChannel chan<- udp.UDPMessage) {
 	for {
 		select {
 		case message := <- sendOrderChannel:
@@ -107,7 +107,7 @@ func sendMessageHandler(sendOrderChannel <-chan OrderStruct, sendChannel <-chan 
 				printDebug("Sent an OrderStruct with event: " + EventType[msg.Event])
 			}
 
-		case message := <-sendChannel:
+		case message := <-sendBackupChannel:
 			networkPacket, err := json.Marshal(message)
 			if err != nil {
 				printDebug("Error marshaling outgoing message")
