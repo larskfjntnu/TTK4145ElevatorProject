@@ -50,4 +50,3 @@ const BUTTON_DOWN1          = -1
 const BUTTON_UP4            = -1
 const LIGHT_DOWN1           = -1
 const LIGHT_UP4             = -1
-

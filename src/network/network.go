@@ -48,7 +48,7 @@ func Init(receiveOrderChannel chan <- OrderStruct, receiveChannel chan<- BackupS
 	to the main module.(Make generic interface which supports extracting received messages.)
 	The receive channel is where these messages are passed to the calling module.
 */
-func receiveMessageHandler(receiveOrderChannel chan<- OrderStruct, receiveChannel chan<- BackupStruct, UDPReceiveChannel <-chan udp.UDPMessage) {
+func receiveOrderAndBackupServer(receiveOrderChannel chan<- ExtOrderStruct, UDPReceiveChannel <-chan udp.UDPMessage) {
 	for {
 		select {
 		case message := <-UDPReceiveChannel:
@@ -60,28 +60,30 @@ func receiveMessageHandler(receiveOrderChannel chan<- OrderStruct, receiveChanne
 			} else {
 				m := f.(map[string]interface{})
 				eventNum := int(m["Event"].(float64))
-				if eventNum <= 3 && eventNum >= 0 {
-					var elevState = StateStruct{}
-					if error := json.Unmarshal(message.Data[:message.Length], &elevState); err == nil{
+				if eventNum <= 2 && eventNum >= 0 {
+					var newExtOrder = ExtOrderStruct{}
+					if error := json.Unmarshal(message.Data[:message.Length], &newExtOrder); err == nil{
 						if elevState.Valid() {
 							receiveChannel <- elevState;
-							printDebug("Received a StateStruct with event: " + EventType[elevState.Event])
+							printDebug("Received a ExtOrderStruct with event: " + EventType[elevState.Event])
 						} else {
-							printDebug("Rejected a StateStruct with event: " + EventType[elevState.Event])
+							printDebug("Rejected a ExtOrderStruct with event: " + EventType[elevState.Event])
 						}
 					} else {
-						printDebug("Error unmarshaling a StateStruct")
+						printDebug("Error unmarshaling an ExtOrderStruct")
 					}
-				}else if eventNum >= 4 && event <= 10 {
-					var order = OrderStruct{}
-					if err := json.Unmarshal(message.Data[:message.Length], &order); err == nil {
-						if order.Valid() {
-							receiveOrderChannel <- order
-							printDebug("Received an OrderStruct with Event: " + EventType[order.Event])
-						} else {
-							printDebug("Rejected an OrderStruct with Event: " + EventType[order.Event])
+				} else if eventNum >= 3 && event <= 4 {
+					var backup = ExtBackupStruct{}
+					if err := json.Unmarshal(message.Data[:message.Length], &order); err == nil {
+						if backup.Valid() {
+							receiveBackupChannel <- backup
+							printDebug("Received an ExtBackupStruct with Event: " + EventType[backup.Event])
+						} else {
+							printDebug("Rejected an ExtBackupStruct with Event: " + EventType[backup.Event])
 						}
-					} 
+					} else {
+						printDebug("Error unmarshaling a ExtBackupStruct")
+					}
 				} else {
 					log.Println("Received message with unknown type ")
 				}				
@@ -89,17 +91,18 @@ func receiveMessageHandler(receiveOrderChannel chan<- OrderStruct, receiveChanne
 		}
 	}
 }
+
 /*
 	This handle takes care of sending messages on the connectionport or broadcastport.
 	It takes in the sendChannel initialized in the calling module and the UDPSendChannel declared in 
 	this modules Init function. We send the message in JSON format and prints an error if the marshaling failed.
 */
-func sendMessageHandler(sendOrderChannel <-chan OrderStruct, sendChannel <-chan BackupStruct, UDPSendChannel chan<- udp.UDPMessage) {
+func sendOrderAndBackupHandler(sendOrderChannel <-chan ExtOrderStruct, sendChannel <-chan ExtBackupStruct, UDPSendChannel chan<- udp.UDPMessage) {
 	for {
 		select {
 		case message := <- sendOrderChannel:
 			packet, err = json.Marshal(message)
-			if err != nil {
+			if err != nil {
 				printDebug("Error marshaling outgoing message")
 				log.Println(err)
 			} else {

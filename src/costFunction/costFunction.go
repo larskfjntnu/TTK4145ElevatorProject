@@ -1,17 +1,16 @@
-package CostFunction
+package costFunction
 
 /*
 	This module is used to calculate wich elevator should respond to a given
-	order. This is run as a separate goroutine, which does not run continously,
-	but is started by the Master Elevator's Main module. It runs through
-	the compution of the cost function, then terminates.
+	order.
 */
 
 /*
-	This is the function that is run as a goroutine(or not?). It takes the the floor
+	This is the function that calculates the 'optimal' elevator. It takes the the floor
 	the elevator is being ordered to and the direction the "customer" wants
-	to go as arguments and calculates the optimal (at least we hope it does)
-	elevator to respond to the call.
+	to go as arguments and calculates the optimal elevator to respond to the call.
+	It also needs all elevators states which are found by using the activeElevators
+	to access knownElevators
 */
 func calculateRespondingElevator(knownElevators map[string]*Elevator, activeElevators []string) (assignedTo string, floor, type int) {
 	// TODO -> Implement some algorithm to calculate the optimal elevator

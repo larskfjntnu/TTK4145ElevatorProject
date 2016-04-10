@@ -31,10 +31,11 @@ import (
 	"typedef"
 	"driver"
 	"log"
+	. "./src/typedef"
 	)
 
 
-// ------------------------- CONSTANT and VARIABLE DECLERATdriver.IONS
+// ------------------------- CONSTANT and VARIABLE DECLERATIONS
 var lightChannelMatrix = [typedef.N_FLOORS][typedef.N_BUTTONS]int {
 	{LIGHT_UP1, LIGHT_DOWN1, LIGHT_COMMAND1},
 	{LIGHT_UP2, LIGHT_DOWN2, LIGHT_COMMAND2},
@@ -49,7 +50,7 @@ var buttonChannelMatrix = [typedef.N_FLOORS][typedef.N_BUTTONS]int {
 }
 
 type ButtonEvent struct{
-	ButtonType int
+	Type int
 	Floor int
 	Value bool
 }
@@ -64,7 +65,7 @@ type MotorEvent struct{
 	MotorDirection int
 }
 
-type FloorEvent struct{
+type FloorSensorEvent struct{
 	CurrentDirection int
 	Floor int
 }
@@ -78,10 +79,10 @@ const motorspeed = 2800
 
 
 
-//		-----------------------  FUNCTdriver.ION DECLERATdriver.IONS    -----------------------------------
+//		-----------------------  FUNCTION DECLERATIONS    -----------------------------------
 
 
-func Init(buttonChannel chan<- ButtonEvent, lightChannel <-chan LightEvent, motorChannel <-chan int, floorChannel chan<- FloorEvent, DelayInPolling time.Duration) error{
+func Init(hardwareEventChannel chan HardwareEvent ,delayInPolling time.Duration) error{
 	if initialized{
 		return fmt.Errorf("Hardware is already initialized.")
 	}
@@ -90,12 +91,8 @@ func Init(buttonChannel chan<- ButtonEvent, lightChannel <-chan LightEvent, moto
 		return fmt.Errorf("Unable to initialize hardware.")
 	}
 	resetLights()
-
-	// Start goroutines to handle lights and motors.
-	go controlLights(lightChannel)
-	go controlMotor(motorChannel)
-
 	setMotorDirection(typedef.DIR_STOP)
+	
 	// If initialized between floors, move down to nearest floor.
 	if checkFloor() == -1 {
 		printDebug("Starting between floors, going down")
@@ -113,15 +110,47 @@ func Init(buttonChannel chan<- ButtonEvent, lightChannel <-chan LightEvent, moto
 	}
 
 	// Start goroutines to handle polling hardware
-	go readButtons(buttonChannel, DelayInPolling)
-	go readFloorSensors(floorChannel, DelayInPolling)
+	go hardwareRoutine(hardwareEventChannel, delayInPolling)
 	return nil
 	// TODO -> Acceptance test!!!
 }
 
+/*  This function runs continously as a goroutine, handling two way commmunication with the
+	main loop.
+*/
+func hardwareRoutine(hardwareEventChannel chan HardwareEvent, delayInPolling time.Duration){
+	buttonChannel := make(<-chan ButtonEvent)
+	floorSensorChannel :=make(<-chan FloorSensorEvent)
+	
+	go buttonPolling(buttonChannel, delayInPolling)
+	go floorSensorPolling(floorSensorChannel, delayInPolling)
+	for{
+		select{
+			case hwEvent := <- hardwareEventChannel:
+				eventType := hwEvent.Event
+				switch eventType{
+					case EvLight:
+						setLights(LightEvent{Type: hwEvent.LightType, Floor: hwEvent.Floor, Value: hwEvent.Value})
+					case EvMotor:
+						setMotorDirection(hwEvent.MotorDirection)
+				}
+			case btEvent := <- buttonChannel:
+				hardwareEventChannel <- HardwareEvent{ Event: EvButtonPressed,
+														Floor: btEvent.Floor, 
+														ButtonType: btEvent.Type,
+														}
+			case fSEvent := <- floorSensorChannel:
+				hardwareEventChannel <- HardwareEvent{ Event: EvFloorReached,
+														Floor: fSEvent.Floor,
+														CurrentDirection: fSEvent.CurrentDirection
+														}
+		}
+	}
+}
+
 
 // This function runs continously as a goroutine, pinging the hardware for button presses.
-func readButtons(buttonChannel chan<- ButtonEvent, DelayInPolling time.Duration){
+func buttonPolling(buttonChannel chan<- ButtonEvent, DelayInPolling time.Duration){
 	readingMatrix := [typedef.N_FLOORS][typedef.N_BUTTONS]bool{}
 	var stopButton bool = false
 	var stopState bool = false
@@ -176,7 +205,7 @@ func readButtons(buttonChannel chan<- ButtonEvent, DelayInPolling time.Duration)
 }
 
 // This function runs continously as a goroutine, pinging the hardware for floor arrivals.
-func readFloorSensors(floorChannel chan<- FloorEvent, DelayInPolling time.Duration){
+func floorSensorPolling(floorChannel chan<- FloorEvent, DelayInPolling time.Duration){
 	lastFloor := -1
 	for{
 		floor := checkFloor()
@@ -188,37 +217,6 @@ func readFloorSensors(floorChannel chan<- FloorEvent, DelayInPolling time.Durati
 		time.Sleep(DelayInPolling)
 	}
 }
-// This function runs continously as a goroutine, waiting for orders to set lights.
-func controlLights(lightChannel <-chan LightEvent){
-	for{
-		select{
-			case lightEvent:=<-lightChannel:
-				switch lightEvent.LightType{
-				case typedef.BUTTON_CALL_UP, typedef.BUTTON_CALL_DOWN, typedef.BUTTON_COMMAND:
-					setButtonLight(lightEvent.Floor, lightEvent.LightType, lightEvent.Value)
-				case typedef.BUTTON_STOP:
-					setStopLamp(lightEvent.Value)
-				case typedef.DOOR_LAMP:
-					setDoorLamp(lightEvent.Value)
-				default:
-					// Do some error handling.
-				}
-		}	
-	}
-}
-
-// This function runs continously as a goroutine, waiting for orders to set the motor direction
-// TODO ->  Does this need to be goroutine? could we just call setMotorDirection directly?
-func controlMotor(motorChannel <-chan int){
-	for {
-		select{
-			case motorEv :=<-motorChannel:
-				fmt.Printf("CONTROLMOTOR:\t Received direction: %d\n", motorEv)
-				setMotorDirection(motorEv)
-		}
-	}
-}
-
 
 // --------------------- Check hardware functions ----------------------------
 /*
@@ -267,7 +265,7 @@ func checkObstructionSignal() bool {
 }
 
 
-// ------------------------ Set motor -----------------------------
+// ------------------------ Set Functions -----------------------------
 
 /*
 	This function/channel(called from another goroutine) sets the direction of
@@ -292,7 +290,20 @@ func setMotorDirection(direction int) error {
 	return nil
 }
 
-// ------------------------ Light functions --------------------------------
+// This function sets the lights based on a LightEvent.
+func setLights(lightEvent LightEvent){
+	switch lightEvent.LightType{
+	case typedef.BUTTON_CALL_UP, typedef.BUTTON_CALL_DOWN, typedef.BUTTON_COMMAND:
+		setButtonLight(lightEvent.Floor, lightEvent.LightType, lightEvent.Value)
+	case typedef.BUTTON_STOP:
+		setStopLamp(lightEvent.Value)
+	case typedef.DOOR_LAMP:
+		setDoorLamp(lightEvent.Value)
+	default:
+		// Do some error handling.
+	}
+}
+
 
 /*
 	This function/channel (called from another goroutine) sets the light of a 
@@ -378,17 +389,3 @@ func printDebug(message string){
 		log.Println("Hardware:\t message")
 	}
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-

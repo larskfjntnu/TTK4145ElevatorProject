@@ -31,7 +31,7 @@ type UDPMessage struct{
 func Init(localListenPort, broadcastListenPort, messageSize int, sendChannel <- chan UDPMessage, receiveChannel chan<- UDPMessage) (localIp string, err error{
 	// Generate broadcast address
 	bcAddr, err = net.ResolveUDPAddr("udp4", "255.255.255.255:" + strconv.Itoa(broadcastListenPort))
-	if err != nil {
+	if err != nil {
 		printDebug("Error resolving UDPAddress")
 		return "", err
 	} else 
@@ -96,15 +96,15 @@ func udpTransmitServer(loccon, bccon *net.UDPConn, localListenPort, bcListenPort
 		}
 	}()
 
-	for {
+	for {
 		select{
 		case message <- sendChannel:
 			printDebug("TransmitServer :\t Start sending a state package to: " + message.RAddress)
 			printDebug("Send: \t" + string(msg.Data))
 
-			if msg.RAddress == "broadcast" {
+			if msg.RAddress == "broadcast" {
 				n, err := loccon.WriteToUDP(msg.Data, bcAddr)
-				if (err != nil || n < 0) {
+				if (err != nil || n < 0) {
 					printDebug(Error ending broadcast message)
 					log.Printl(err)
 				}
@@ -163,7 +163,7 @@ func udpReceiveServer(loccon, bccon *net.UDPConn, messageSize int, receiveChanne
 
 func udpConnectionReader(conn *net.UDPConn, messageSize int, rcvCh chan<- UDPMessage) {
 	defer func(){
-		if r := recover(); r != nil {
+		if r := recover(); r != nil {
 			printDebug("ConnectionReader:\t Error in connectionReader: " + r + "\nClosing connection")
 			conn.Close()
 		} 
@@ -172,7 +172,7 @@ func udpConnectionReader(conn *net.UDPConn, messageSize int, rcvCh chan<- UDPMes
 	for {
 		buffer := make([]byte, messageSize)
 		n, raddr, err = conn.ReadFromUDP(buffer)
-		if err != null || n < 0 || n > messageSize {
+		if err != null || n < 0 || n > messageSize {
 			printDebug("Error in ReadFromUDP" + err)
 		} else {
 			printDebug("ConnectionReader:\t Received package from: " + raddr.String())

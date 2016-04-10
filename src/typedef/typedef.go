@@ -29,23 +29,35 @@ const (
 	DOOR_LAMP
 )
 
-// Events
+// Events OrderEvents are 0-4
 const(
-	EventBackup = iota
-	EventRequestState
-	EventReturnRestoredState
-	EventNewOrder
-	EventConfirmOrder
-	EventAcknowledgeConfirmedOrder
-	EventOrderDone
-	EventAcknowledgeOrderDone
-	EventReassignOrder
+	// Events that may be received in ExtOrderStruct
+	EventSendOrderToElevator = iota
+	EventAccOrderFromElevator
+	EventConfirmAccFromElevator
+	
+	// Events that may be received in ExtBackupStruct
+	EventSendBackupToAll
+	EventRequestStateFromElevator
+	
+	// Internal order event
+	EventReceivedOrderFromElevator
+	
+	// Internal backup event
+	EventReceivedBackupFromElevator
+	EventNoBackupWithinLimit
+	
+	// HW events
+	EventButtonPressed
+	EventFloorReached
+	EventSetMotor
+	EventSetLight
+	
 )
 
 // Order status
 const (
-	Inactive = iota
-	Waiting
+	Waiting = iota
 	Executing
 )
 
@@ -62,19 +74,21 @@ var HardwareEventType = []string{
 }
 
 var EventType = []string{
-	"EventBackup",
-	"EventRequestState",
-	"EventReturnRestoredState",
-	"EventNewOrder",
-	"EventConfirmOrder",
-	"EventAcknowledgeConfirmedOrder"
-	"EventOrderDone",
-	"EventAcknowledgeOrderDone",
-	"EventReassignOrder",
+	"EventSendOrderToElevator",
+	"EventAccOrderFromElevator",
+	"EventConfirmAccFromElevator",
+	"EventSendBackupToAll",
+	"EventRequestStateFromElevator",
+	"EventReceivedOrderFromElevator"
+	"EventReceivedBackupFromElevator",
+	"EventNoBackupWithinLimit",
+	"EventButtonPress",
+	"EventFloorReached",
+	"EventSetMotor",
+	"EventSetLight",
 }
 
-var OrderStatus = []string{
-	"Inactive",
+var OrderStatus = []string{
 	"Waiting",
 	"Executing"
 }
@@ -88,8 +102,20 @@ var MotorDirections = []string {
 
 // ------------- Data structures
 
+// Hardware structs
+
+type HardwareEvent struct{
+	LightType int
+	Floor int
+	Value bool
+	MotorDirection int
+	ButtonType int
+	CurrentDirection int
+	Event int
+}
+
 // The elevators state
-type StateStruct struct {
+type StateStruct struct {
 	LocalIP string
 	InternalOrders [N_FLOORS]bool
 	ExternalOrders [N_FLOORS][2] bool
@@ -99,19 +125,30 @@ type StateStruct struct {
 	OpenDoor bool
 }
 
-// Order struct to be sent to the appropriate elevator
-type OrderStruct struct {
+type OrderStruct struct{
+	OrderID int
+	Floor int
+	Type int
+	ReceviedTime time.Time
+	Status int
+}
+
+// Extended Order struct to be sent to the appropriate elevator
+type ExtendedOrderStruct struct {
+	Order OrderStruct
 	SendTo string // IP
 	SentFrom string // IP
 	Event int
-	Floor int
-	ButtonType int
 } 
 
-// Backup struct to be sent to master
-type BackupStruct struct {
-	State StateStruct
-	SenderIP string // only for answering on state request
+type BackupStruct struct {
+	CurrentState StateStruct
+	BackupTime time.Time // Time of creation, i.e. the time the backup is saved in other prosess
+}
+
+// Extended Backup struct to to others
+type ExtBackupStruct struct {
+	State BackupStruct
 	RequesterIP string // only for requesting state
 	Event int // Categorizes the type of message. 'alive', 'request' or 'answertorequest'
 }
@@ -122,7 +159,7 @@ type Elevator struct{
 }
 
 
-func MakeBackupMessage(e *Elevator) BackupStruct {
+func MakeBackupMessage(e *Elevator) BackupStruct {
 	return BackupStruct{State: e.State, Event: EventBackup}
 }
 
@@ -134,16 +171,16 @@ func (e Elevator) ShouldStop() bool {
 		return true;
 	case DIR_UP:
 		return !e.OrdersAbove() || e.ExternalOrders[floor][BUTTON_CALL_UP] ||
-			    e.InternalOrders[floor] || floor == N_FLOORS-1
+			    e.InternalOrders[floor] || floor == N_FLOORS-1
 	case DIR_DOWN:
-		return !e.OrdersBelow() || e.ExternalOrders[floor][BUTTON_DIR_DOWN ||
-				e.InternalOrders[floor] || floor == 0
+		return !e.OrdersBelow() || e.ExternalOrders[floor][BUTTON_DIR_DOWN ||
+				e.InternalOrders[floor] || floor == 0
 	}
 	return true
 }
 
 func (e Elevator) GetNextDirection() int {
-	if !e.HaveOrders() {
+	if !e.HaveOrders() {
 		return DIR_STOP
 	}
 
@@ -159,9 +196,9 @@ func (e Elevator) GetNextDirection() int {
 		}
 		falltrough
 	case STOP:
-		if e.OrdersAbove() {
+		if e.OrdersAbove() {
 			return DIR_UP
-		} else if e.OrdersBelow() {
+		} else if e.OrdersBelow() {
 			return DIR_DOWN
 		}
 	}
@@ -170,7 +207,7 @@ func (e Elevator) GetNextDirection() int {
 }
 
 func (s StateStruct) OrdersAbove() bool {
-	for floor := N_FLOORS -1;  floor > s.PrevFloor; floor-- {
+	for floor := N_FLOORS -1;  floor > s.PrevFloor; floor-- {
 		if s.InternalOrders[floor]{
 			return true
 		}
@@ -203,7 +240,7 @@ func (s StateStruct) OrderAtFloor() bool {
 }
 
 func (s StateStruct) HaveOrders() bool {
-	return OrdersBelow() || OrdersAbove() || OrderAtFloor
+	return OrdersBelow() || OrdersAbove() || OrderAtFloor
 }
 
 
