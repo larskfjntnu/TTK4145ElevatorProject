@@ -28,21 +28,21 @@ package hardware
 import (
 	"fmt"
 	"time"
-	"typedef"
 	"driver"
 	"log"
-	. "./src/typedef"
+	"strconv"
+	."../typedef"
 	)
 
 
 // ------------------------- CONSTANT and VARIABLE DECLERATIONS
-var lightChannelMatrix = [typedef.N_FLOORS][typedef.N_BUTTONS]int {
+var lightChannelMatrix = [N_FLOORS][N_BUTTONS]int {
 	{LIGHT_UP1, LIGHT_DOWN1, LIGHT_COMMAND1},
 	{LIGHT_UP2, LIGHT_DOWN2, LIGHT_COMMAND2},
 	{LIGHT_UP3, LIGHT_DOWN3, LIGHT_COMMAND3},
 	{LIGHT_UP4, LIGHT_DOWN4, LIGHT_COMMAND4},
 }
-var buttonChannelMatrix = [typedef.N_FLOORS][typedef.N_BUTTONS]int {
+var buttonChannelMatrix = [N_FLOORS][N_BUTTONS]int {
 	{BUTTON_UP1, BUTTON_DOWN1, BUTTON_COMMAND1},
 	{BUTTON_UP2, BUTTON_DOWN2, BUTTON_COMMAND2},
 	{BUTTON_UP3, BUTTON_DOWN3, BUTTON_COMMAND3},
@@ -78,11 +78,14 @@ var initialized bool = false
 const motorspeed = 2800
 
 
+var debug bool = true
+
 
 //		-----------------------  FUNCTION DECLERATIONS    -----------------------------------
 
 
 func Init(hardwareEventChannel chan HardwareEvent ,delayInPolling time.Duration) error{
+	printDebug("Init")
 	if initialized{
 		return fmt.Errorf("Hardware is already initialized.")
 	}
@@ -91,22 +94,24 @@ func Init(hardwareEventChannel chan HardwareEvent ,delayInPolling time.Duration)
 		return fmt.Errorf("Unable to initialize hardware.")
 	}
 	resetLights()
-	setMotorDirection(typedef.DIR_STOP)
+	setMotorDirection(DIR_STOP)
 	
 	// If initialized between floors, move down to nearest floor.
-	if checkFloor() == -1 {
+	if floor:= checkFloor(); floor == -1 {
 		printDebug("Starting between floors, going down")
-		setMotorDirection(typedef.DIR_DOWN)
+		setMotorDirection(DIR_DOWN)
 		for {
 			if floor:= checkFloor(); floor != -1 {
-				printDebug("INIT -> Arrived at floor: " + floor.String())
-				setMotorDirection(typedef.DIR_STOP)
-				floorChannel <- FloorEvent{CurrentDirection: typedef.DIR_STOP, Floor: floor}
+				printDebug("INIT -> Arrived at floor: " + strconv.Itoa(floor))
+				setMotorDirection(DIR_STOP)
+				hardwareEventChannel <- HardwareEvent{Event: EventFloorReached, CurrentDirection: DIR_DOWN, Floor: floor}
 				break
 			} else {
-				time.Sleep(DelayInPolling)
+				time.Sleep(delayInPolling)
 			}
 		}
+	} else {
+		hardwareEventChannel <- HardwareEvent{Event: EventFloorReached, CurrentDirection: DIR_DOWN, Floor: floor}
 	}
 
 	// Start goroutines to handle polling hardware
@@ -119,30 +124,22 @@ func Init(hardwareEventChannel chan HardwareEvent ,delayInPolling time.Duration)
 	main loop.
 */
 func hardwareRoutine(hardwareEventChannel chan HardwareEvent, delayInPolling time.Duration){
-	buttonChannel := make(<-chan ButtonEvent)
-	floorSensorChannel :=make(<-chan FloorSensorEvent)
+	buttonChannel := make(chan ButtonEvent)
+	floorSensorChannel :=make(chan FloorSensorEvent)
 	
 	go buttonPolling(buttonChannel, delayInPolling)
 	go floorSensorPolling(floorSensorChannel, delayInPolling)
 	for{
 		select{
-			case hwEvent := <- hardwareEventChannel:
-				eventType := hwEvent.Event
-				switch eventType{
-					case EvLight:
-						setLights(LightEvent{Type: hwEvent.LightType, Floor: hwEvent.Floor, Value: hwEvent.Value})
-					case EvMotor:
-						setMotorDirection(hwEvent.MotorDirection)
-				}
 			case btEvent := <- buttonChannel:
-				hardwareEventChannel <- HardwareEvent{ Event: EvButtonPressed,
+				hardwareEventChannel <- HardwareEvent{ Event: EventButtonPressed,
 														Floor: btEvent.Floor, 
 														ButtonType: btEvent.Type,
 														}
 			case fSEvent := <- floorSensorChannel:
-				hardwareEventChannel <- HardwareEvent{ Event: EvFloorReached,
+				hardwareEventChannel <- HardwareEvent{ Event: EventFloorReached,
 														Floor: fSEvent.Floor,
-														CurrentDirection: fSEvent.CurrentDirection
+														CurrentDirection: fSEvent.CurrentDirection,
 														}
 		}
 	}
@@ -150,22 +147,22 @@ func hardwareRoutine(hardwareEventChannel chan HardwareEvent, delayInPolling tim
 
 
 // This function runs continously as a goroutine, pinging the hardware for button presses.
-func buttonPolling(buttonChannel chan<- ButtonEvent, DelayInPolling time.Duration){
-	readingMatrix := [typedef.N_FLOORS][typedef.N_BUTTONS]bool{}
-	var stopButton bool = false
-	var stopState bool = false
-	var obstructionSignal = false
+func buttonPolling(buttonChannel chan ButtonEvent, DelayInPolling time.Duration){
+	readingMatrix := [N_FLOORS][N_BUTTONS]bool{}
+	stopButton := false
+	stopState  := false
+	obstructionSignal := false
 
 	// This while loop runs continously, polling the hardware for button presses.
 	for {
 		// Check if there are any new orders(buttons pressed).
-		for floor := 0; floor < typedef.N_FLOORS; floor ++ {
-			for buttonType := typedef.BUTTON_CALL_UP; buttonType < typedef.BUTTON_COMMAND + 1; buttonType++ {
+		for floor := 0; floor < N_FLOORS; floor ++ {
+			for buttonType := BUTTON_CALL_UP; buttonType < BUTTON_COMMAND + 1; buttonType++ {
 				if checkButtonPressed(buttonType, floor) {
 					if !readingMatrix[floor][buttonType] {
 						readingMatrix[floor][buttonType] = true
 						// Pass a hardwareevent to the event channel.
-						buttonChannel <- ButtonEvent{ButtonType: buttonType, Floor: floor}
+						buttonChannel <- ButtonEvent{Type: buttonType, Floor: floor}
 					}
 				} else {
 					// Make sure readingMatrix is set to false for this button.
@@ -179,11 +176,11 @@ func buttonPolling(buttonChannel chan<- ButtonEvent, DelayInPolling time.Duratio
 				stopButton = true
 				if stopButton && !stopState{
 					// First time we press stop
-					buttonChannel <- ButtonEvent{ButtonType: typedef.BUTTON_STOP, Value: true}
+					buttonChannel <- ButtonEvent{Type: BUTTON_STOP, Value: true}
 					stopState=true
 				} else if stopButton &&stopState{
 					// Second time we press stop
-					buttonChannel <- ButtonEvent{ButtonType: typedef.BUTTON_STOP, Value: false}
+					buttonChannel <- ButtonEvent{Type: BUTTON_STOP, Value: false}
 					stopState=false
 				}
 
@@ -205,14 +202,14 @@ func buttonPolling(buttonChannel chan<- ButtonEvent, DelayInPolling time.Duratio
 }
 
 // This function runs continously as a goroutine, pinging the hardware for floor arrivals.
-func floorSensorPolling(floorChannel chan<- FloorEvent, DelayInPolling time.Duration){
+func floorSensorPolling(floorChannel chan FloorSensorEvent, DelayInPolling time.Duration){
 	lastFloor := -1
 	for{
 		floor := checkFloor()
 		if (floor != -1) && (floor != lastFloor){
 			lastFloor = floor
 			setFloorIndicator(floor)
-			floorChannel <- FloorEvent{Floor: floor} 
+			floorChannel <- FloorSensorEvent{Floor: floor} 
 			}	
 		time.Sleep(DelayInPolling)
 	}
@@ -273,7 +270,7 @@ func checkObstructionSignal() bool {
 	immediately).
 */
 func setMotorDirection(direction int) error {
-	printDebug("Setting motor direction: " + direction)
+	printDebug("Setting motor direction: " + strconv.Itoa(direction))
 	if direction == 0 {
 		driver.IOWriteAnalog(MOTOR, 0)
 	} else if direction > 0 {
@@ -291,13 +288,13 @@ func setMotorDirection(direction int) error {
 }
 
 // This function sets the lights based on a LightEvent.
-func setLights(lightEvent LightEvent){
+func SetLights(lightEvent LightEvent){
 	switch lightEvent.LightType{
-	case typedef.BUTTON_CALL_UP, typedef.BUTTON_CALL_DOWN, typedef.BUTTON_COMMAND:
+	case BUTTON_CALL_UP, BUTTON_CALL_DOWN, BUTTON_COMMAND:
 		setButtonLight(lightEvent.Floor, lightEvent.LightType, lightEvent.Value)
-	case typedef.BUTTON_STOP:
+	case BUTTON_STOP:
 		setStopLamp(lightEvent.Value)
-	case typedef.DOOR_LAMP:
+	case DOOR_LAMP:
 		setDoorLamp(lightEvent.Value)
 	default:
 		// Do some error handling.
@@ -324,7 +321,7 @@ func setButtonLight(floor, buttonType int, value bool) error {
 */
 func setFloorIndicator(floor int) {
 	// Binary encoding, one light is always on 00, 01, 10 or 11
-	if floor >= typedef.N_FLOORS || floor < 0 {
+	if floor >= N_FLOORS || floor < 0 {
 		log.Println("HARDWARE:\t Tried to set indicator on invalid floor.")
 		// todo set floor to nearest valid floor.
 	}
@@ -364,8 +361,8 @@ func setStopLamp(value bool) {
 
 
 func resetLights() {
-	for f:=0;f<typedef.N_FLOORS;f++{
-		for b:=typedef.BUTTON_CALL_UP;b<typedef.N_BUTTONS;b++{
+	for f:=0;f< N_FLOORS;f++{
+		for b:= BUTTON_CALL_UP;b<N_BUTTONS;b++{
 			setButtonLight(f, b, false)
 		}
 	}
@@ -386,6 +383,6 @@ func SetMotorDirection(dir int){
 
 func printDebug(message string){
 	if debug{
-		log.Println("Hardware:\t message")
+		log.Println("Hardware:\t" + message)
 	}
 }

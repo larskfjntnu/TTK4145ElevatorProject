@@ -1,8 +1,6 @@
 package typedef
 
-include(
-	"time"
-)
+import "time"
 
 const N_FLOORS int = 4 // TODO -> Do this dynamically.
 const N_BUTTONS int = 3
@@ -39,6 +37,11 @@ const(
 	// Events that may be received in ExtBackupStruct
 	EventSendBackupToAll
 	EventRequestStateFromElevator
+	EventStillOnline
+	EventAccBackup
+	EventBackupAtAllConfirmed
+	EventAnsweringBackupRequest
+
 	
 	// Internal order event
 	EventReceivedOrderFromElevator
@@ -79,7 +82,11 @@ var EventType = []string{
 	"EventConfirmAccFromElevator",
 	"EventSendBackupToAll",
 	"EventRequestStateFromElevator",
-	"EventReceivedOrderFromElevator"
+	"EventStillOnline",
+	"EventAccBackup",
+	"EventBackupAtAllConfirmed",
+	"EventAnsweringBackupRequest",
+	"EventReceivedOrderFromElevator",
 	"EventReceivedBackupFromElevator",
 	"EventNoBackupWithinLimit",
 	"EventButtonPress",
@@ -90,13 +97,13 @@ var EventType = []string{
 
 var OrderStatus = []string{
 	"Waiting",
-	"Executing"
+	"Executing",
 }
 
 var MotorDirections = []string {
-	"DOWN"
-	"STOP"
-	"UP"
+	"DOWN",
+	"STOP",
+	"UP",
 }
 
 
@@ -108,7 +115,6 @@ type HardwareEvent struct{
 	LightType int
 	Floor int
 	Value bool
-	MotorDirection int
 	ButtonType int
 	CurrentDirection int
 	Event int
@@ -129,12 +135,13 @@ type OrderStruct struct{
 	OrderID int
 	Floor int
 	Type int
-	ReceviedTime time.Time
+	ReceivedTime time.Time
+	DispatchedTime time.Time
 	Status int
 }
 
 // Extended Order struct to be sent to the appropriate elevator
-type ExtendedOrderStruct struct {
+type ExtOrderStruct struct {
 	Order OrderStruct
 	SendTo string // IP
 	SentFrom string // IP
@@ -149,6 +156,8 @@ type BackupStruct struct {
 // Extended Backup struct to to others
 type ExtBackupStruct struct {
 	State BackupStruct
+	SentFrom string
+	SendTo string
 	RequesterIP string // only for requesting state
 	Event int // Categorizes the type of message. 'alive', 'request' or 'answertorequest'
 }
@@ -159,8 +168,8 @@ type Elevator struct{
 }
 
 
-func MakeBackupMessage(e *Elevator) BackupStruct {
-	return BackupStruct{State: e.State, Event: EventBackup}
+func MakeBackupMessage(e *Elevator) ExtBackupStruct {
+	return ExtBackupStruct{State: BackupStruct{CurrentState: e.State}, Event: EventSendBackupToAll}
 }
 
 func (e Elevator) ShouldStop() bool {
@@ -170,40 +179,52 @@ func (e Elevator) ShouldStop() bool {
 	case DIR_STOP:
 		return true;
 	case DIR_UP:
-		return !e.OrdersAbove() || e.ExternalOrders[floor][BUTTON_CALL_UP] ||
-			    e.InternalOrders[floor] || floor == N_FLOORS-1
+		return !e.State.OrdersAbove() || e.State.ExternalOrders[floor][BUTTON_CALL_UP] || e.State.InternalOrders[floor] || floor == N_FLOORS-1
 	case DIR_DOWN:
-		return !e.OrdersBelow() || e.ExternalOrders[floor][BUTTON_DIR_DOWN ||
-				e.InternalOrders[floor] || floor == 0
+		return !e.State.OrdersBelow() || e.State.ExternalOrders[floor][BUTTON_CALL_DOWN] || e.State.InternalOrders[floor] || floor == 0
 	}
 	return true
 }
 
-func (e Elevator) GetNextDirection() int {
-	if !e.HaveOrders() {
+func (e *Elevator) SetDirection(dir int){
+	e.State.CurrentDirection = dir
+}
+
+func (e *Elevator) IsMoving() bool{
+	return e.State.Moving
+}
+
+func (e *Elevator) SetMoving(b bool){
+	e.State.Moving = b
+}
+
+func (e *Elevator) GetNextDirection() int {
+	if !e.State.HaveOrders() {
 		return DIR_STOP
 	}
 
-	switch e.State.Direction {
+	switch e.State.CurrentDirection {
 	case DIR_DOWN:
-		if e.OrdersBelow() && e.State.PrevFloor != 0{
+		if e.State.OrdersBelow() && e.State.PrevFloor != 0{
 			return DIR_DOWN
 		}
-		falltrough
 	case DIR_UP:
-		if e.OrdersAbove() && e.State.PrevFloor != N_FLOORS - 1{
+		if e.State.OrdersAbove() && e.State.PrevFloor != N_FLOORS - 1{
 			return DIR_UP
 		}
-		falltrough
-	case STOP:
-		if e.OrdersAbove() {
+	case DIR_STOP:
+		if e.State.OrdersAbove() {
 			return DIR_UP
-		} else if e.OrdersBelow() {
+		} else if e.State.OrdersBelow() {
 			return DIR_DOWN
 		}
 	}
-	return STOP
+	return DIR_STOP
 
+}
+
+func (s StateStruct) IsMoving() bool{
+	return s.Moving
 }
 
 func (s StateStruct) OrdersAbove() bool {
@@ -211,7 +232,7 @@ func (s StateStruct) OrdersAbove() bool {
 		if s.InternalOrders[floor]{
 			return true
 		}
-		for _, order := range e.State.ExternalOrders[floor] {
+		for _, order := range s.ExternalOrders[floor] {
 			if order {
 				return true
 			}
@@ -225,7 +246,7 @@ func (s StateStruct) OrdersBelow() bool {
 		if s.InternalOrders[floor] {
 			return true
 		}
-		for _, order := range e.State.ExternalOrders[floor] {
+		for _, order := range s.ExternalOrders[floor] {
 			if order {
 				return true
 			}
@@ -240,10 +261,17 @@ func (s StateStruct) OrderAtFloor() bool {
 }
 
 func (s StateStruct) HaveOrders() bool {
-	return OrdersBelow() || OrdersAbove() || OrderAtFloor
+	return s.OrdersBelow() || s.OrdersAbove() || s.OrderAtFloor()
 }
 
+func (o ExtOrderStruct) Valid() bool {
+	// TODO -> Actually implement an acceptance test to see if the order is valid.
+	return true
+}
 
+func (b ExtBackupStruct) Valid() bool {
+	return true
+}
 
 
 

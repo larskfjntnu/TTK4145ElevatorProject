@@ -11,7 +11,7 @@ package network
 import (
 	"encoding/json"
 	"log"
-	. "./src/typedef"
+	."../typedef"
 	"../udp"
 )
 
@@ -24,8 +24,8 @@ const debug = false
 	It sets the hardcoded ports for listening and broadcast ports, and makes two corresponding UDPMessage channels
 	for sending and receiving. It calls the init function from the udp module to set up the udp connection.
 */
-func Init(receiveOrderChannel chan <- OrderStruct, receiveChannel chan<- BackupStruct,
-	sendOrderChannel <-chan OrderStruct, sendChannel <-chan BackupStruct) (localIP string, err error) {
+func Init(receiveOrderChannel chan ExtOrderStruct, receiveChannel chan ExtBackupStruct,
+	sendOrderChannel chan ExtOrderStruct, sendChannel chan ExtBackupStruct) (localIP string, err error) {
 	const messageSize = 4 * 1024
 	const UDPLocalListenPort = 22301
 	const UDPBroadcastListenPort = 22302
@@ -35,8 +35,9 @@ func Init(receiveOrderChannel chan <- OrderStruct, receiveChannel chan<- BackupS
 	if err != nil {
 		return "", err
 	}
-	go receiveMessageHandler(receiveOrderChannel, receiveChannel, UDPReceiveChannel)
-	go sendMessageHandler(sendOrderChannel, sendChannel, UDPSendChannel)
+	go receiveOrderAndBackupServer(receiveOrderChannel, receiveChannel, UDPReceiveChannel)
+	go sendOrderAndBackupHandler(sendOrderChannel, sendChannel, UDPSendChannel)
+	printDebug("Network initialized")
 	return localIP, nil
 }
 
@@ -48,7 +49,7 @@ func Init(receiveOrderChannel chan <- OrderStruct, receiveChannel chan<- BackupS
 	to the main module.(Make generic interface which supports extracting received messages.)
 	The receive channel is where these messages are passed to the calling module.
 */
-func receiveOrderAndBackupServer(receiveOrderChannel chan<- ExtOrderStruct, UDPReceiveChannel <-chan udp.UDPMessage) {
+func receiveOrderAndBackupServer(receiveOrderChannel chan ExtOrderStruct, receiveBackupChannel chan ExtBackupStruct, UDPReceiveChannel <-chan udp.UDPMessage) {
 	for {
 		select {
 		case message := <-UDPReceiveChannel:
@@ -62,24 +63,24 @@ func receiveOrderAndBackupServer(receiveOrderChannel chan<- ExtOrderStruct, UDPR
 				eventNum := int(m["Event"].(float64))
 				if eventNum <= 2 && eventNum >= 0 {
 					var newExtOrder = ExtOrderStruct{}
-					if error := json.Unmarshal(message.Data[:message.Length], &newExtOrder); err == nil{
-						if elevState.Valid() {
-							receiveChannel <- elevState;
-							printDebug("Received a ExtOrderStruct with event: " + EventType[elevState.Event])
+					if err := json.Unmarshal(message.Data[:message.Length], &newExtOrder); err == nil{
+						if newExtOrder.Valid() {
+							receiveOrderChannel <- newExtOrder;
+							printDebug("Received a ExtOrderStruct with event: " + EventType[newExtOrder.Event])
 						} else {
-							printDebug("Rejected a ExtOrderStruct with event: " + EventType[elevState.Event])
+							printDebug("Rejected a ExtOrderStruct with event: " + EventType[newExtOrder.Event])
 						}
 					} else {
 						printDebug("Error unmarshaling an ExtOrderStruct")
 					}
-				} else if eventNum >= 3 && event <= 4 {
-					var backup = ExtBackupStruct{}
-					if err := json.Unmarshal(message.Data[:message.Length], &order); err == nil {
-						if backup.Valid() {
-							receiveBackupChannel <- backup
-							printDebug("Received an ExtBackupStruct with Event: " + EventType[backup.Event])
+				} else if eventNum >= 3 && eventNum <= 4 {
+					var newExtBackup = ExtBackupStruct{}
+					if err := json.Unmarshal(message.Data[:message.Length], &newExtBackup); err == nil {
+						if newExtBackup.Valid() {
+							receiveBackupChannel <- newExtBackup
+							printDebug("Received an ExtBackupStruct with Event: " + EventType[newExtBackup.Event])
 						} else {
-							printDebug("Rejected an ExtBackupStruct with Event: " + EventType[backup.Event])
+							printDebug("Rejected an ExtBackupStruct with Event: " + EventType[newExtBackup.Event])
 						}
 					} else {
 						printDebug("Error unmarshaling a ExtBackupStruct")
@@ -101,16 +102,16 @@ func sendOrderAndBackupHandler(sendOrderChannel <-chan ExtOrderStruct, sendChann
 	for {
 		select {
 		case message := <- sendOrderChannel:
-			packet, err = json.Marshal(message)
+			packet, err := json.Marshal(message)
 			if err != nil {
 				printDebug("Error marshaling outgoing message")
 				log.Println(err)
 			} else {
 				UDPSendChannel <- udp.UDPMessage{RAddress: "broadcast", Data: packet}
-				printDebug("Sent an OrderStruct with event: " + EventType[msg.Event])
+				printDebug("Sent an OrderStruct with event: " + EventType[message.Event])
 			}
 
-		case message := <-sendBackupChannel:
+		case message := <-sendChannel:
 			networkPacket, err := json.Marshal(message)
 			if err != nil {
 				printDebug("Error marshaling outgoing message")

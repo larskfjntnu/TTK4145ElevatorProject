@@ -17,44 +17,54 @@ package main
 	respond to the order.
 */
 import (
-	"fmt"
 	"time"
-	"udp"
-	"hardware"
-	"time"
-	"network"
+	"log"
+	"strconv"
+	"strings"
+	"./src/hardware"
+	"./src/network"
 	. "./src/typedef"
+	"os"
 )
+
+const debug bool = true
 
 func main() {
 	
 	// Order id can be generated from IP address + some counting variable
 
-	const delayInPolling = 50 * time.Milliseconds
+
+	const delayInPolling = 50 * time.Millisecond
 	const attemptToConnectLimit = 5
+	const checkElevatorsTick = 100*time.Millisecond
+	const checkBackupAccTick = 500*time.Millisecond
+	const checkOrderAccTick = 500*time.Millisecond
+	const reassigOrderTick = 500*time.Millisecond
+
+	const backupLimit = 300*time.Millisecond
+	const orderTimeoutLimit = 300*time.Millisecond
+	const dispatchOrderTimeout = 300*time.Millisecond
+
 	const elevatorOnlineTick = 100 * time.Millisecond
-	const elevatorOnlineLimit = 3 * elevOnlineTick + 10*time.Millisecond
+	const elevatorOnlineLimit = 3 * elevatorOnlineTick + 10*time.Millisecond
 	const accTimeoutLimit = 500 * time.Millisecond
 	const doorOpentime = 500 * time.Millisecond
 	const waitForBackupLimit = 2000 * time.Millisecond
 	var localIP string
 	var localState = StateStruct{}
 	var knownElevators = make(map[string]*Elevator) // IP address is key
-	var waitingBackups = make(map[string]*Elevator)
+	var waitingBackups = make(map[string]*BackupStruct)
 	var activeElevators = make(map[string]bool) // IP address is key
 	var backupAccknowledgementList = make(map[string] bool)
-	var waitingOrders = make(map[int] OrderStruct) // order ID is key
-	var dispatchedOrders make(map[int] OrderStruct)
-	var requestedBackup := false
-	var stateChanged := false
-	
-	var waitingOrders = make(map[int]*OrderStruct)
+	var waitingOrders = make(map[int] *OrderStruct) // order ID is key
+	var dispatchedOrders = make(map[int] *OrderStruct)
+	var stateChanged bool 
+	var locOrderID int
 
 
 	// Initializing hardware
 	printDebug("Starting main loop")
-	hardwareChannel := make(chan HardwareEvent)
-	s
+	hardwareChannel := make(chan HardwareEvent, 10)
 	if err := hardware.Init(hardwareChannel, delayInPolling); err != nil {
 		printDebug("Hardware Initializing failed")
 		log.Fatal(err)
@@ -63,12 +73,13 @@ func main() {
 	}
 
 	// Initializing network
-	sendBackupChannel := make(chan<- ExtBackupEvent, 5)
-	receiveBackupChannel := make(<-chan ExtBackupEvent)
-	sendOrderChannel := make(chan<- ExtOrderEvent, 5)
-	receiveOrderChannel := make(<- chan ExtOrderEvent)
+	sendBackupChannel := make(chan ExtBackupStruct, 5)
+	receiveBackupChannel := make(chan ExtBackupStruct)
+	sendOrderChannel := make(chan ExtOrderStruct, 5)
+	receiveOrderChannel := make(chan ExtOrderStruct)
 
-	localIP, err := networkInit(attemptToConnectLimit, receiveOrderChannel, sendOrderChannel, receiveRecoveryChannel, sendRecoveryChannel)
+	localIP, err := networkInit(attemptToConnectLimit, receiveOrderChannel, sendOrderChannel, receiveBackupChannel, sendBackupChannel, 2*time.Second)
+	locOrderID = seedOrderID(localIP)
 	if err != nil {
 		printDebug("network Initializing failed")
 		log.Fatal(err)
@@ -78,22 +89,37 @@ func main() {
 
 	// Initializing state
 	printDebug("Requesting previous state")
-	sendRecoveryChannel <- ExtBackupStruct{
-		RequesterIP: localIP
-		Event: EventRequestStateFromElevator
+	sendBackupChannel <- ExtBackupStruct{
+		RequesterIP: localIP,
+		Event: EventRequestStateFromElevator,
 	}
+	hasRequestedBackup := false
+
+	// TODO ->  Some loop waiting for answer on backup, receiveBackupChannel with timeout?
+
 	// Blocking here until something is put on channel
-	localState = StateStruct{LocalIP: localIP, PrevFloor: <- floorChannel}
-	knownElevators[localIP] = makeElevatorStruct(localState)
-	setActiveElevators(knownElevators, activeElevators, localIP, elevOnlineLimit)
-	printDebug("Finished initializing state, starting from floor: " knownElevators[localIP].State.LastFloor)
+	printDebug("Blocking")
+	firsFloorEvent := <- hardwareChannel
+	localState = StateStruct{LocalIP: localIP, PrevFloor: firsFloorEvent.Floor,}
+	knownElevators[localIP] = &Elevator{State: localState,}
+	setActiveElevators(knownElevators, activeElevators, localIP, elevatorOnlineLimit)
+	printDebug("Finished initializing state, starting from floor: " + strconv.Itoa(knownElevators[localIP].State.PrevFloor))
 
 
 	// Initializing timers
-	checkIfOnlineTicker := time.NewTicker(elevatorOnlineLimit)
+	checkIfOnlineTicker := time.NewTicker(checkElevatorsTick)
 	defer checkIfOnlineTicker.Stop()
 	confirmOnlineTicker := time.NewTicker(elevatorOnlineTick)
 	defer confirmOnlineTicker.Stop()
+	checkBackupAccTimer := time.NewTimer(checkBackupAccTick)
+	checkBackupAccTimer.Stop()
+	defer checkBackupAccTimer.Stop()
+	checkOrderAccTimer := time.NewTimer(checkOrderAccTick)
+	checkOrderAccTimer.Stop()
+	defer checkOrderAccTimer.Stop()
+	reassignOrderTimer := time.NewTimer(reassigOrderTick)
+	reassignOrderTimer.Stop()
+	defer reassignOrderTimer.Stop()
 	doorTimer := time.NewTimer(time.Second)
 	doorTimer.Stop()
 	defer doorTimer.Stop()
@@ -109,7 +135,7 @@ func main() {
 
 		//Hardware events
 		case hwEvent := <- hardwareChannel:
-			printDebug("Received a " + EventType[hwEvent.Event] + " from floor " + hwEvent.Floor + ". " + activeElevators.len() + " active elevators.")
+			printDebug("Received a " + EventType[hwEvent.Event] + " from floor " + strconv.Itoa(hwEvent.Floor) + ". " + strconv.Itoa(len(activeElevators)) + " active elevators.")
 			
 			switch hwEvent.Event{
 				
@@ -124,113 +150,113 @@ func main() {
 						printDebug("Cannot accept external order while offline.")
 					} else {
 						// Do something with the order.
-						assignedIP, err := CostFunction.AssignNewOrder(knownElevators, activeElevators, button.Floor, button.Type)
-						order := OrderStruct{OrderID: locOrderID++,
-											SentFrom: localIP,
-											Floor: button.Floor,
-											Type: button.Type,
+						assignedIP := localIP //CostFunction.AssignNewOrder(knownElevators, activeElevators, button.Floor, button.Type)
+						var err error
+						order := OrderStruct{OrderID: locOrderID,
+											Floor: hwEvent.Floor,
+											Type: hwEvent.ButtonType,
 											}
+						locOrderID = locOrderID + 1
 						if err != nil {
 							log.Fatal(err)
 						} else {
 							if assignedIP == localIP{
-								addOrderToThisElevator(order)
+								addOrderToThisElevator(order, localState, knownElevators, localIP)
 							} else {
-								dispatchedOrders[order.OrderID] = order
+								dispatchedOrders[order.OrderID] = &order
 								dispatchedOrders[order.OrderID].DispatchedTime = time.Now()
 								sendOrderChannel <- ExtOrderStruct{SendTo: assignedIP,
 																	Order: order,
 																	SentFrom: localIP,
-																	Event: EventNewOrder
+																	Event: EventSendOrderToElevator,
 																	}
 							}
 						}
 					}
 				// Internal order
 				case  BUTTON_COMMAND:
-					if !knownElevators[localIP].State.IsMoving && knownElevators[localIP].State.LastFloor == button.Floor {
+					lightEvent := hardware.LightEvent{}
+					if !knownElevators[localIP].State.Moving && knownElevators[localIP].State.PrevFloor == hwEvent.Floor {
 						// We are at a standstill at this floor
-						var lightEvent := hardware.LightEvent{Type: DOOR_INDICATOR, Value: true}
+						lightEvent = hardware.LightEvent{LightType: DOOR_LAMP, Value: true}
 						printDebug("Opening door")
 						doorTimer.Reset(doorOpentime)
 						knownElevators[localIP].State.OpenDoor = true
-						var backupState := MakeBackupState(knownElevators[localIP], externalOrders)
 					} else {
 						printDebug("Internal order added to queue")
-						localState.SetInternalOrder(button.Floor)
+						localState.InternalOrders[hwEvent.Floor] = true
 						knownElevators[localIP].State = localState
 						stateChanged = true
-						var lightEvent := hardware.LightEvent{Type: button.Type, Floor: button.Floor, Value: true}
-						if knownElevators[localIP].IsIdle() && !knownElevators[localIP].State.OpenDoor {
+						lightEvent = hardware.LightEvent{LightType: hwEvent.ButtonType, Floor: hwEvent.Floor, Value: true}
+						if !knownElevators[localIP].State.Moving && !knownElevators[localIP].State.OpenDoor {
 							doorTimer.Reset(0*time.Millisecond)
 						}
 					}
-					lightChannel <- lightEvent
-					sendRecoveryChannel <- backupState
+					hardware.SetLights(lightEvent)
 				// Stop button pressed
 				case BUTTON_STOP:
-					motorChannel <- STOP
-					lightChannel <- hardware.LightEvent{Type: BUTTON_STOP, Value: true}
-					printDebug('\n\n\n')
-					printDebug('Elevator was killed\n\n\n')
+					hardware.SetMotorDirection(DIR_STOP)
+					hardware.SetLights(hardware.LightEvent{LightType: BUTTON_STOP, Value: true,})
+					printDebug("\n\n\n")
+					printDebug("Elevator was killed\n\n\n")
 					time.Sleep(300*time.Millisecond)
 					os.Exit(1)
 				default:
-					printDebug('Received button event from the hardware module')
+					printDebug("Received button event from the hardware module")
 				}
 				
 				// A floor is reached	
-		case hwEvent.EventFloorReached:
+		case EventFloorReached:
 			// Reached a floor
-			printDebug("Reached floor: " + floorEvent.Floor)
-			knownElevators[localIP].LastFloor = floor
+			printDebug("Reached floor: " + strconv.Itoa(hwEvent.Floor))
+			knownElevators[localIP].State.PrevFloor = hwEvent.Floor
 			if knownElevators[localIP].ShouldStop(){
 				// We are stopping at this floor
-				motorChannel <- STOP
-				knownElevators[localIP].SetMoving(false)
+				hardware.SetMotorDirection(DIR_STOP)
+				knownElevators[localIP].State.Moving = false
 				printDebug("Opening doors")
 				doorTimer.Reset(doorOpentime)
-				lightChannel <- hardware.LightEvent{Type: DOOR_INDICATOR, Value: true}
-				knownElevators[localIP].InternalOrders[floorEvent.Floor] = false
-				lightChannel <- hardware.LightEvent{Floor: floor, Type: BUTTON_COMMAND, Value: false}
-				if floorEvent.CurrentDirection == DIR_DOWN { 
-					knownElevators[localIP].externalOrders[floorEvent.floor][0] = 0
-					lightChannel <- hardware.LightEvent{Floor: floor, Type: BUTTON_CALL_DOWN, Value: false}
-				} else if floorEvent.CurrentDirection == DIR_UP {
-					knownElevators[localIP].externalOrders[floorEvent.floor][1] = 0
-					lightChannel <- hardware.LightEvent{Floor: floor, Type: BUTTON_CALL_UP, Value: false}
+				hardware.SetLights(hardware.LightEvent{LightType: DOOR_LAMP, Value: true})
+				knownElevators[localIP].State.InternalOrders[hwEvent.Floor] = false
+				hardware.SetLights(hardware.LightEvent{Floor: hwEvent.Floor, LightType: BUTTON_COMMAND, Value: false})
+				if hwEvent.CurrentDirection == DIR_DOWN { 
+					knownElevators[localIP].State.ExternalOrders[hwEvent.Floor][0] = false
+					hardware.SetLights(hardware.LightEvent{Floor: hwEvent.Floor, LightType: BUTTON_CALL_DOWN, Value: false})
+				} else if hwEvent.CurrentDirection == DIR_UP {
+					knownElevators[localIP].State.ExternalOrders[hwEvent.Floor][1] = false
+					hardware.SetLights(hardware.LightEvent{Floor: hwEvent.Floor, LightType: BUTTON_CALL_UP, Value: false})
 				}
 			}
 		}
 
 		// Order events
 		case extOrder := <-receiveOrderChannel:
-			printDebug("Received an " + EventType[order.Event] + " from " + order.SentFrom)
+			printDebug("Received an " + EventType[extOrder.Event] + " from " + extOrder.SentFrom)
 
 			switch extOrder.Event {
 			// Order receiver side
-			case EventNewOrder:
+			case EventSendOrderToElevator:
 				order := extOrder.Order
-				printDebug("Order " + ButtonType[order.ButtonType] + " on floor " + strconv.Itoa(order.Floor))
-				waitingOrders[order.OrderID] = order
+				printDebug("Order " + HardwareEventType[order.Type] + " on floor " + strconv.Itoa(order.Floor))
+				waitingOrders[order.OrderID] = &order
 				waitingOrders[order.OrderID].ReceivedTime = time.Now()
 				// TODO -> Do something here to make a timer run to check wether the acc is being confirmed.
 				// Accknowledge order
-				sendOrderChannel <- ExtOrderStruct{SendTo: extOrder.sentFrom,
+				sendOrderChannel <- ExtOrderStruct{SendTo: extOrder.SentFrom,
 													SentFrom: localIP,
 												    Event: EventAccOrderFromElevator}
 			
 			case EventConfirmAccFromElevator:
-				if !m[extOrder.OrderID]{
-					order = waitingOrders[extOrder.OrderID]
-					addOrderToThisElevator(order)
+				if _, ok := waitingOrders[extOrder.Order.OrderID]; ok {
+					order := waitingOrders[extOrder.Order.OrderID]
+					addOrderToThisElevator(*order, localState, knownElevators, localIP)
 					stateChanged = true
-					delete(waitingOrders, extOrder.OrderID)
+					delete(waitingOrders, extOrder.Order.OrderID)
 				}
 				
 			// Order dispatcher side
 			case EventAccOrderFromElevator:
-				delete(dispatchedOrders, extOrder.OrderID)
+				delete(dispatchedOrders, extOrder.Order.OrderID)
 				sendOrderChannel <- ExtOrderStruct{SendTo: extOrder.SentFrom,
 													 SentFrom: localIP,
 													 Event: EventConfirmAccFromElevator}
@@ -242,7 +268,7 @@ func main() {
 			
 		// Backup
 		case extBackup := <- receiveBackupChannel:
-			printDebug("Received and " + EventType[extBackup.Event] + " from " + extBackup.SenderIP)
+			printDebug("Received and " + EventType[extBackup.Event] + " from " + extBackup.SentFrom)
 			
 			
 			switch extBackup.Event{
@@ -251,21 +277,21 @@ func main() {
 					// Received backup from someone..
 					if extBackup.Event == EventSendBackupToAll{
 						// Received updated state
-						waitingBackups[extBackup.SentFrom] = extBackup.CurrentState
+						waitingBackups[extBackup.SentFrom] = &extBackup.State
 						waitingBackups[extBackup.SentFrom].BackupTime = time.Now()
 						sendBackupChannel <- ExtBackupStruct{SentFrom: localIP, Event: EventAccBackup}
 					}
 					// Update last time backup was received
-					knownElevators[extBackup.SentFrom].BackupTime = time.Now()
+					knownElevators[extBackup.SentFrom].Time = time.Now()
 					
 				case EventBackupAtAllConfirmed:
 					backup := waitingBackups[extBackup.SentFrom]
-					knownElevators[extBackup.SentFrom] = backup
-					knownElevators[extBackup.SentFrom].BackupTime = time.Now()
+					knownElevators[extBackup.SentFrom].State = backup.CurrentState
+					knownElevators[extBackup.SentFrom].Time = time.Now()
 					delete(waitingBackups, extBackup.SentFrom)
 					
 				// Backup sender side
-				case extBackup.EventAccBackup:
+				case EventAccBackup:
 					// Someone accknowledged our backup
 					backupAccknowledgementList[extBackup.SentFrom] = true
 					if allOtherAccBackup(backupAccknowledgementList, activeElevators) {
@@ -277,17 +303,17 @@ func main() {
 				// Backup Requests
 				case EventRequestStateFromElevator:
 				//  SendAnswer to backup request
-					if knownElevators[extBackup.SentFrom]{
+					if _,ok := knownElevators[extBackup.SentFrom]; ok{
 						sendBackupChannel <- ExtBackupStruct{Event: EventAnsweringBackupRequest,
 																SendTo: extBackup.SentFrom,
 																SentFrom: localIP,
-																State knownElevators[extBackup.SentFrom].Backup
+																State: BackupStruct{CurrentState: knownElevators[extBackup.SentFrom].State,},
 																}
 					}
 				case EventAnsweringBackupRequest:
 					// We have received an answer to our backuprequest
-					if hasRequstedBackup{
-						localState = extBackup.Stae.CurrentState
+					if hasRequestedBackup{
+						localState = extBackup.State.CurrentState
 						hasRequestedBackup  = false
 					}			
 			}
@@ -295,12 +321,20 @@ func main() {
 			
 		// Timers
 		case <- confirmOnlineTicker.C:
-			sendRecoveryChannel <- ExtBackupStruct{Event: EventStillOnline,
+			if stateChanged{
+				sendBackupChannel <- ExtBackupStruct{Event: EventSendBackupToAll,
+													 SentFrom: localIP,
+													 State: BackupStruct{CurrentState: localState,},
+													}
+			} else {
+				sendBackupChannel <- ExtBackupStruct{Event: EventStillOnline,
 													SentFrom: localIP,
 													}
+			}
+			
 
 		case <- checkIfOnlineTicker.C:
-			setActiveElevators(knownElevators, activeElevators, localIP, timeoutLimit)
+			setActiveElevators(knownElevators, activeElevators, localIP, elevatorOnlineLimit)
 
 		case <- checkBackupAccTimer.C:
 			// Removed waiting backups that have timed out.
@@ -316,9 +350,9 @@ func main() {
 					delete(waitingOrders, orderID)
 				}
 			}
-		case reassignOrderTimer.C:
+		case <-reassignOrderTimer.C:
 			// Reassign order that has not been confirmed.
-			for orderID, order := range(dispatchedOrders){
+			for _, order := range(dispatchedOrders){
 				if time.Since(order.DispatchedTime) > dispatchOrderTimeout{
 					reassignOrder(order)
 				}
@@ -329,32 +363,33 @@ func main() {
 			printDebug("EventDoorTimeout")
 			printDebug("Closing door ")
 			knownElevators[localIP].State.OpenDoor = false
-			lightChannel <- hardware.LightEvent{LightType: DOOR_LAMP, Value: false}
+			hardware.SetLights(hardware.LightEvent{LightType: DOOR_LAMP, Value: false})
 
 			// Check if we should start to move
 			if knownElevators[localIP].State.HaveOrders(){
 				knownElevators[localIP].SetDirection(knownElevators[localIP].GetNextDirection())
-				knownElevators[localIP].SetMoving(knownElevators[localIP].State.Direction != DIR_STOP)
+				knownElevators[localIP].SetMoving(knownElevators[localIP].State.CurrentDirection != DIR_STOP)
 				printDebug("Have orders to execute")
-				printDebug("Going " + MotorDirections[knownElevators[localIP].State.Direction + 1])
-				lightChannel <- hardware.LightEvent(Floor: knownElevators[localIP].State.LastFloor, LightType: BUTTON_COMMAND, Value: false)
-				motorChannel <- knownElevators[localIP].State.Direction
+				printDebug("Going " + MotorDirections[knownElevators[localIP].State.CurrentDirection + 1])
+				hardware.SetLights(hardware.LightEvent{Floor: knownElevators[localIP].State.PrevFloor, LightType: BUTTON_COMMAND, Value: false})
+				hardware.SetMotorDirection(knownElevators[localIP].State.CurrentDirection)
 			} else {
 				printDebug("Nothing to do")
 				knownElevators[localIP].SetMoving(false)
 				knownElevators[localIP].SetDirection(DIR_STOP)
 			}
-			sendRecoveryChannel <- MakeBackupMessage(knownElevators[localIP])
+			sendBackupChannel <- MakeBackupMessage(knownElevators[localIP])
 		}
 	}
 }
 
-func networkInit(attemptToConnectLimit int, receiveOrderChannel, sendOrderChannel chan OrderStruct, receiveRecoveryChannel, sendRecoveryChannel chan StateStruct, timeoutLimit time.Duration){
-	for i := 0; i <= attemptToConnectLimit: i++ {
-		localIP, err := network.Init(receiveOrderChannel, sendOrderChannel, receiveRecoveryChannel, sendRecoveryChannel)
+func networkInit(attemptToConnectLimit int, receiveOrderChannel chan ExtOrderStruct, sendOrderChannel chan ExtOrderStruct, receiveRecoveryChannel chan ExtBackupStruct, sendRecoveryChannel chan ExtBackupStruct, timeoutLimit time.Duration)(string, error){
+	printDebug("Connecting to network")
+	for i := 0; i <= attemptToConnectLimit; i++ {
+		localIP, err := network.Init(receiveOrderChannel, receiveRecoveryChannel, sendOrderChannel, sendRecoveryChannel)
 		if err != nil {
 			if i == 0 {
-				printDebug("Failed network Initializing, trying " + (attemptToConnectLimit - i).string() +" more times.")
+				printDebug("Failed network Initializing, trying " + strconv.Itoa(attemptToConnectLimit - i) +" more times.")
 			} else if i == attemptToConnectLimit {
 				return "", err
 			}
@@ -366,9 +401,9 @@ func networkInit(attemptToConnectLimit int, receiveOrderChannel, sendOrderChanne
 	return "", nil
 }
 
-func setActiveElevators(knownElevators map[string]*ElevatorStruct, activeElevators map[string]bool, localIP string){
+func setActiveElevators(knownElevators map[string]*Elevator, activeElevators map[string]bool, localIP string, timeoutLimit time.Duration){
 	for key := range knownElevators{
-		if time.Since(knownElevators[key].Time) =< timeoutLimit {
+		if time.Since(knownElevators[key].Time) >= timeoutLimit {
 			if activeElevators[key] != true {
 				activeElevators[key] = true
 				printDebug("Added elevator " + knownElevators[key].State.LocalIP)
@@ -389,15 +424,15 @@ func seedOrderID(localIP string) int {
 	return orderID
 }
 
-func addOrderToThisElevator(order OrderStruct){
+func addOrderToThisElevator(order OrderStruct, localState StateStruct, knownElevator map[string]*Elevator, localIP string){
 	switch order.Type{
-		case BUTTON_DOWN:
+		case BUTTON_CALL_DOWN:
 			localState.ExternalOrders[order.Floor][0] = true
-		case BUTTON_UP:
+		case BUTTON_CALL_UP:
 			localState.ExternalOrders[order.Floor][1] = true
 	
 	}
-	knownElevator[localIP].BackupStruct.CurrentState = localState
+	knownElevator[localIP].State = localState
 }
 
 func allOtherAccBackup(backupAcknowledgementList, activeElevators map[string]bool) bool {
@@ -411,11 +446,13 @@ func allOtherAccBackup(backupAcknowledgementList, activeElevators map[string]boo
 	return true
 }
 
+func reassignOrder(order *OrderStruct){}
+
 /*
 	Helper function for debuggin
 */
 func printDebug(message string){
 	if debug{
-		log.Println("Main:\t message")
+		log.Println("Main:\t" + message)
 	}
 }

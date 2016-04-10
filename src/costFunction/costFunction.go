@@ -15,4 +15,6 @@ package costFunction
 func calculateRespondingElevator(knownElevators map[string]*Elevator, activeElevators []string) (assignedTo string, floor, type int) {
 	// TODO -> Implement some algorithm to calculate the optimal elevator
 
+	
+
 }
