@@ -37,7 +37,6 @@ func Init(receiveOrderChannel chan ExtOrderStruct, receiveChannel chan ExtBackup
 	}
 	go receiveOrderAndBackupServer(receiveOrderChannel, receiveChannel, UDPReceiveChannel)
 	go sendOrderAndBackupHandler(sendOrderChannel, sendChannel, UDPSendChannel)
-	printDebug("Network initialized")
 	return localIP, nil
 }
 
@@ -73,7 +72,7 @@ func receiveOrderAndBackupServer(receiveOrderChannel chan ExtOrderStruct, receiv
 					} else {
 						printDebug("Error unmarshaling an ExtOrderStruct")
 					}
-				} else if eventNum >= 3 && eventNum <= 4 {
+				} else if eventNum >= 3 && eventNum <= 8 {
 					var newExtBackup = ExtBackupStruct{}
 					if err := json.Unmarshal(message.Data[:message.Length], &newExtBackup); err == nil {
 						if newExtBackup.Valid() {
@@ -98,7 +97,7 @@ func receiveOrderAndBackupServer(receiveOrderChannel chan ExtOrderStruct, receiv
 	It takes in the sendChannel initialized in the calling module and the UDPSendChannel declared in 
 	this modules Init function. We send the message in JSON format and prints an error if the marshaling failed.
 */
-func sendOrderAndBackupHandler(sendOrderChannel <-chan ExtOrderStruct, sendChannel <-chan ExtBackupStruct, UDPSendChannel chan<- udp.UDPMessage) {
+func sendOrderAndBackupHandler(sendOrderChannel <-chan ExtOrderStruct, sendBackupChannel <-chan ExtBackupStruct, UDPSendChannel chan<- udp.UDPMessage) {
 	for {
 		select {
 		case message := <- sendOrderChannel:
@@ -107,18 +106,22 @@ func sendOrderAndBackupHandler(sendOrderChannel <-chan ExtOrderStruct, sendChann
 				printDebug("Error marshaling outgoing message")
 				log.Println(err)
 			} else {
-				UDPSendChannel <- udp.UDPMessage{RAddress: "broadcast", Data: packet}
-				printDebug("Sent an OrderStruct with event: " + EventType[message.Event])
+				UDPSendChannel <- udp.UDPMessage{RAddress: message.SendTo, Data: packet}
+				printDebug("Sent an ExtOrderStruct with event: " + EventType[message.Event])
 			}
 
-		case message := <-sendChannel:
+		case message := <-sendBackupChannel:
 			networkPacket, err := json.Marshal(message)
+			receiver := message.SendTo
+			if message.SendTo == ""{
+				receiver = "broadcast"
+			}
 			if err != nil {
 				printDebug("Error marshaling outgoing message")
 				log.Println(err)
 			} else {
-				UDPSendChannel <- udp.UDPMessage{RAddress: "broadcast", Data: networkPacket}
-				printDebug("Sent a stateStruct with event: " + EventType[message.Event])
+				UDPSendChannel <- udp.UDPMessage{RAddress: receiver, Data: networkPacket}
+				printDebug("Sent a ExtBackupStruct with event: " + EventType[message.Event])
 			}
 		}
 	}

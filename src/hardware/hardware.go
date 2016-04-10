@@ -28,10 +28,10 @@ package hardware
 import (
 	"fmt"
 	"time"
-	"driver"
 	"log"
 	"strconv"
 	."../typedef"
+	"driver"
 	)
 
 
@@ -85,7 +85,6 @@ var debug bool = true
 
 
 func Init(hardwareEventChannel chan HardwareEvent ,delayInPolling time.Duration) error{
-	printDebug("Init")
 	if initialized{
 		return fmt.Errorf("Hardware is already initialized.")
 	}
@@ -94,17 +93,20 @@ func Init(hardwareEventChannel chan HardwareEvent ,delayInPolling time.Duration)
 		return fmt.Errorf("Unable to initialize hardware.")
 	}
 	resetLights()
-	setMotorDirection(DIR_STOP)
+	SetMotorDirection(DIR_STOP)
 	
 	// If initialized between floors, move down to nearest floor.
 	if floor:= checkFloor(); floor == -1 {
 		printDebug("Starting between floors, going down")
-		setMotorDirection(DIR_DOWN)
+		SetMotorDirection(DIR_DOWN)
 		for {
 			if floor:= checkFloor(); floor != -1 {
 				printDebug("INIT -> Arrived at floor: " + strconv.Itoa(floor))
-				setMotorDirection(DIR_STOP)
-				hardwareEventChannel <- HardwareEvent{Event: EventFloorReached, CurrentDirection: DIR_DOWN, Floor: floor}
+				SetMotorDirection(DIR_STOP)
+				hardwareEventChannel <- HardwareEvent{Event: EventFloorReached,
+														CurrentDirection: DIR_DOWN,
+														Floor: floor}
+				setFloorIndicator(floor)
 				break
 			} else {
 				time.Sleep(delayInPolling)
@@ -112,6 +114,7 @@ func Init(hardwareEventChannel chan HardwareEvent ,delayInPolling time.Duration)
 		}
 	} else {
 		hardwareEventChannel <- HardwareEvent{Event: EventFloorReached, CurrentDirection: DIR_DOWN, Floor: floor}
+		setFloorIndicator(floor)
 	}
 
 	// Start goroutines to handle polling hardware
@@ -147,7 +150,7 @@ func hardwareRoutine(hardwareEventChannel chan HardwareEvent, delayInPolling tim
 
 
 // This function runs continously as a goroutine, pinging the hardware for button presses.
-func buttonPolling(buttonChannel chan ButtonEvent, DelayInPolling time.Duration){
+func buttonPolling(buttonChannel chan ButtonEvent, delayInPolling time.Duration){
 	readingMatrix := [N_FLOORS][N_BUTTONS]bool{}
 	stopButton := false
 	stopState  := false
@@ -197,12 +200,12 @@ func buttonPolling(buttonChannel chan ButtonEvent, DelayInPolling time.Duration)
 				obstructionSignal = false
 			}
 		}
-		time.Sleep(DelayInPolling)
+		time.Sleep(delayInPolling)
 	}
 }
 
 // This function runs continously as a goroutine, pinging the hardware for floor arrivals.
-func floorSensorPolling(floorChannel chan FloorSensorEvent, DelayInPolling time.Duration){
+func floorSensorPolling(floorChannel chan FloorSensorEvent, delayInPolling time.Duration){
 	lastFloor := -1
 	for{
 		floor := checkFloor()
@@ -211,7 +214,7 @@ func floorSensorPolling(floorChannel chan FloorSensorEvent, DelayInPolling time.
 			setFloorIndicator(floor)
 			floorChannel <- FloorSensorEvent{Floor: floor} 
 			}	
-		time.Sleep(DelayInPolling)
+		time.Sleep(delayInPolling)
 	}
 }
 
@@ -269,7 +272,7 @@ func checkObstructionSignal() bool {
 	the motor(any other direction than 0/STOP means it will run in this direction
 	immediately).
 */
-func setMotorDirection(direction int) error {
+func SetMotorDirection(direction int) error {
 	printDebug("Setting motor direction: " + strconv.Itoa(direction))
 	if direction == 0 {
 		driver.IOWriteAnalog(MOTOR, 0)
@@ -371,15 +374,6 @@ func resetLights() {
 }
 
 // ----------------  Temporary functions to reset elevator from separate program. ----------------
-
-func ResetLights(){
-	resetLights()
-}
-
-func SetMotorDirection(dir int){
-	setMotorDirection(dir)
-}
-
 
 func printDebug(message string){
 	if debug{

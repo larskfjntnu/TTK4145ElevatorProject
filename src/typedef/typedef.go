@@ -124,7 +124,7 @@ type HardwareEvent struct{
 type StateStruct struct {
 	LocalIP string
 	InternalOrders [N_FLOORS]bool
-	ExternalOrders [N_FLOORS][2] bool
+	ExternalOrders [2][N_FLOORS] bool
 	PrevFloor int
 	CurrentDirection int
 	Moving bool
@@ -155,11 +155,24 @@ type BackupStruct struct {
 
 // Extended Backup struct to to others
 type ExtBackupStruct struct {
-	State BackupStruct
+	BackupData BackupStruct
 	SentFrom string
 	SendTo string
 	RequesterIP string // only for requesting state
 	Event int // Categorizes the type of message. 'alive', 'request' or 'answertorequest'
+}
+
+
+func (e ExtBackupStruct) Valid() bool {
+	ex := e.BackupData.CurrentState.ExternalOrders
+	in := e.BackupData.CurrentState.InternalOrders
+	if len(ex[0]) != N_FLOORS || len(ex[1]) != N_FLOORS || len(in) != N_FLOORS {
+		return false
+	}
+	if e.BackupData.CurrentState.LocalIP != e.SentFrom {
+		return false
+	}
+	return true
 }
 
 type Elevator struct{
@@ -169,10 +182,10 @@ type Elevator struct{
 
 
 func MakeBackupMessage(e *Elevator) ExtBackupStruct {
-	return ExtBackupStruct{State: BackupStruct{CurrentState: e.State}, Event: EventSendBackupToAll}
+	return ExtBackupStruct{BackupData: BackupStruct{CurrentState: e.State}, Event: EventSendBackupToAll}
 }
 
-func (e Elevator) ShouldStop() bool {
+func (e *Elevator) ShouldStop() bool {
 	floor := e.State.PrevFloor
 
 	switch e.State.CurrentDirection{
@@ -188,6 +201,10 @@ func (e Elevator) ShouldStop() bool {
 
 func (e *Elevator) SetDirection(dir int){
 	e.State.CurrentDirection = dir
+}
+
+func(e *Elevator) setDoor(b bool){
+	e.State.OpenDoor = b
 }
 
 func (e *Elevator) IsMoving() bool{
@@ -225,6 +242,14 @@ func (e *Elevator) GetNextDirection() int {
 
 func (s StateStruct) IsMoving() bool{
 	return s.Moving
+}
+
+func (s StateStruct) SetDirection(dir int){
+	s.CurrentDirection = dir
+}
+
+func (s StateStruct) SetMoving(b bool){
+	s.Moving = b
 }
 
 func (s StateStruct) OrdersAbove() bool {
@@ -269,9 +294,6 @@ func (o ExtOrderStruct) Valid() bool {
 	return true
 }
 
-func (b ExtBackupStruct) Valid() bool {
-	return true
-}
 
 
 

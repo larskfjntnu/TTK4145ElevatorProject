@@ -15,8 +15,8 @@ import (
 
 const debug = true
 
-var locAddr *net.UDPAddr
-var bcAddr *net.UDPAddr
+//var locAddr *net.UDPAddr
+//var bcAddr *net.UDPAddr
 
 type UDPMessage struct{
 	RAddress string // "broadcast" or specific ip.
@@ -81,7 +81,7 @@ func Init(localListenPort, broadcastListenPort, messageSize int, sendChannel <- 
 	}
 
 	go udpReceiveServer(localListenCon, bcListenCon, messageSize, receiveChannel)
-	go udpTransmitServer(localListenCon, bcListenCon, localListenPort, broadcastListenPort, sendChannel)
+	go udpTransmitServer(localListenCon, bcListenCon, localListenPort, broadcastListenPort, sendChannel, bcAddr, locAddr)
 	return locAddr.IP.String(), err
 }
 
@@ -90,7 +90,7 @@ func Init(localListenPort, broadcastListenPort, messageSize int, sendChannel <- 
 	of messages in the form of an UDPMessage(struct). It communicates with other routines through a 
 	channel(sendChannel) where it receives UDPMessages to send.
 */
-func udpTransmitServer(loccon, bccon *net.UDPConn, localListenPort, bcListenPort int, sendChannel <-chan UDPMessage) {
+func udpTransmitServer(loccon, bccon *net.UDPConn, localListenPort, bcListenPort int, sendChannel <-chan UDPMessage, bcAddr, locAddr *net.UDPAddr) {
 	defer func() {
 		if r := recover(); r != nil {
 			printDebug("Error in udpTransmitServer: " + "\nClosing connection")
@@ -106,7 +106,9 @@ func udpTransmitServer(loccon, bccon *net.UDPConn, localListenPort, bcListenPort
 			printDebug("Send: \t" + string(message.Data))
 
 			if message.RAddress == "broadcast" {
-				n, err := loccon.WriteToUDP(message.Data, bcAddr)
+				printDebug(bcAddr.String())
+				n, err := bccon.WriteToUDP(message.Data, bcAddr)
+				printDebug(strconv.Itoa(n))
 				if (err != nil || n < 0) {
 					printDebug("Error ending broadcast message")
 					log.Println(err)
@@ -119,7 +121,7 @@ func udpTransmitServer(loccon, bccon *net.UDPConn, localListenPort, bcListenPort
 				}
 				if n, err := loccon.WriteToUDP(message.Data, raddr); err != nil || n < 0 {
 					printDebug("TransmitServer:\t Error sending p2p message")
-					log.Println(err)
+					log.Println("UDP:\t",err)
 				}
 			}
 		}
