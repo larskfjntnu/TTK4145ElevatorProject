@@ -78,7 +78,7 @@ var initialized bool = false
 const motorspeed = 2800
 
 
-var debug bool = true
+var debug bool = false
 
 
 //		-----------------------  FUNCTION DECLERATIONS    -----------------------------------
@@ -96,42 +96,42 @@ func Init(hardwareEventChannel chan HardwareEvent ,delayInPolling time.Duration)
 	SetMotorDirection(DIR_STOP)
 	
 	// If initialized between floors, move down to nearest floor.
-	if floor:= checkFloor(); floor == -1 {
+	startingFloor := -1
+	if startingFloor = checkFloor(); floor == -1 {
 		printDebug("Starting between floors, going down")
 		SetMotorDirection(DIR_DOWN)
 		for {
-			if floor:= checkFloor(); floor != -1 {
-				printDebug("INIT -> Arrived at floor: " + strconv.Itoa(floor))
+			if startingFloor = checkFloor(); startingFloor != -1 {
+				printDebug("INIT -> Arrived at floor: " + strconv.Itoa(startingFloor))
 				SetMotorDirection(DIR_STOP)
 				hardwareEventChannel <- HardwareEvent{Event: EventFloorReached,
 														CurrentDirection: DIR_DOWN,
-														Floor: floor}
-				setFloorIndicator(floor)
+														Floor: startingFloor}
+				setFloorIndicator(startingFloor)
 				break
 			} else {
 				time.Sleep(delayInPolling)
 			}
 		}
 	} else {
-		hardwareEventChannel <- HardwareEvent{Event: EventFloorReached, CurrentDirection: DIR_DOWN, Floor: floor}
-		setFloorIndicator(floor)
+		hardwareEventChannel <- HardwareEvent{Event: EventFloorReached, CurrentDirection: DIR_STOP, Floor: startingFloor}
+		setFloorIndicator(startingFloor)
 	}
 
 	// Start goroutines to handle polling hardware
-	go hardwareRoutine(hardwareEventChannel, delayInPolling)
+	go hardwareRoutine(hardwareEventChannel, delayInPolling, startingFloor)
 	return nil
-	// TODO -> Acceptance test!!!
 }
 
 /*  This function runs continously as a goroutine, handling two way commmunication with the
 	main loop.
 */
-func hardwareRoutine(hardwareEventChannel chan HardwareEvent, delayInPolling time.Duration){
+func hardwareRoutine(hardwareEventChannel chan HardwareEvent, delayInPolling time.Duration, startingFloor int){
 	buttonChannel := make(chan ButtonEvent)
 	floorSensorChannel :=make(chan FloorSensorEvent)
 	
 	go buttonPolling(buttonChannel, delayInPolling)
-	go floorSensorPolling(floorSensorChannel, delayInPolling)
+	go floorSensorPolling(floorSensorChannel, delayInPolling, startingFloor)
 	for{
 		select{
 			case btEvent := <- buttonChannel:
@@ -205,8 +205,8 @@ func buttonPolling(buttonChannel chan ButtonEvent, delayInPolling time.Duration)
 }
 
 // This function runs continously as a goroutine, pinging the hardware for floor arrivals.
-func floorSensorPolling(floorChannel chan FloorSensorEvent, delayInPolling time.Duration){
-	lastFloor := -1
+func floorSensorPolling(floorChannel chan FloorSensorEvent, delayInPolling time.Duration, startingFloor int){
+	lastFloor := startingFloor
 	for{
 		floor := checkFloor()
 		if (floor != -1) && (floor != lastFloor){
@@ -291,14 +291,14 @@ func SetMotorDirection(direction int) error {
 }
 
 // This function sets the lights based on a LightEvent.
-func SetLights(lightEvent LightEvent){
-	switch lightEvent.LightType{
+func SetLights(lightType, floor int, value bool){
+	switch lightType{
 	case BUTTON_CALL_UP, BUTTON_CALL_DOWN, BUTTON_COMMAND:
-		setButtonLight(lightEvent.Floor, lightEvent.LightType, lightEvent.Value)
+		setButtonLight(floor, lightType, value)
 	case BUTTON_STOP:
-		setStopLamp(lightEvent.Value)
+		setStopLamp(value)
 	case DOOR_LAMP:
-		setDoorLamp(lightEvent.Value)
+		setDoorLamp(value)
 	default:
 		// Do some error handling.
 	}

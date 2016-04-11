@@ -13,7 +13,7 @@ import (
 	"log"
 )
 
-const debug = true
+const debug = false
 
 //var locAddr *net.UDPAddr
 //var bcAddr *net.UDPAddr

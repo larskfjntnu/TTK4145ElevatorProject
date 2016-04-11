@@ -143,6 +143,7 @@ type OrderStruct struct{
 // Extended Order struct to be sent to the appropriate elevator
 type ExtOrderStruct struct {
 	Order OrderStruct
+	OrderID int
 	SendTo string // IP
 	SentFrom string // IP
 	Event int
@@ -271,22 +272,20 @@ func (s StateStruct) OrdersBelow() bool {
 		if s.InternalOrders[floor] {
 			return true
 		}
-		for _, order := range s.ExternalOrders[floor] {
-			if order {
-				return true
-			}
+		if s.ExternalOrders[0][floor] || s.ExternalOrders[1][floor]{
+			return true
 		}
 	}
 	return false
 }
 
-func (s StateStruct) OrderAtFloor() bool {
+func (s StateStruct) OrderAtCurrentFloor() bool {
 	floor := s.PrevFloor
-	return s.InternalOrders[floor] || s.ExternalOrders[floor][0] || s.ExternalOrders[floor][1]
+	return s.InternalOrders[floor] || s.ExternalOrders[0][floor] || s.ExternalOrders[1][floor]
 }
 
 func (s StateStruct) HaveOrders() bool {
-	return s.OrdersBelow() || s.OrdersAbove() || s.OrderAtFloor()
+	return s.OrdersBelow() || s.OrdersAbove() || s.OrderAtCurrentFloor()
 }
 
 func (o ExtOrderStruct) Valid() bool {
