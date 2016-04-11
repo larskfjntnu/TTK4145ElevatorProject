@@ -37,16 +37,16 @@ import (
 
 // ------------------------- CONSTANT and VARIABLE DECLERATIONS
 var lightChannelMatrix = [N_FLOORS][N_BUTTONS]int {
-	{LIGHT_UP1, LIGHT_DOWN1, LIGHT_COMMAND1},
-	{LIGHT_UP2, LIGHT_DOWN2, LIGHT_COMMAND2},
-	{LIGHT_UP3, LIGHT_DOWN3, LIGHT_COMMAND3},
-	{LIGHT_UP4, LIGHT_DOWN4, LIGHT_COMMAND4},
+	{LIGHT_DOWN1, LIGHT_UP1, LIGHT_COMMAND1},
+	{LIGHT_DOWN2, LIGHT_UP2, LIGHT_COMMAND2},
+	{LIGHT_DOWN3, LIGHT_UP3, LIGHT_COMMAND3},
+	{LIGHT_DOWN4, LIGHT_UP4, LIGHT_COMMAND4},
 }
 var buttonChannelMatrix = [N_FLOORS][N_BUTTONS]int {
-	{BUTTON_UP1, BUTTON_DOWN1, BUTTON_COMMAND1},
-	{BUTTON_UP2, BUTTON_DOWN2, BUTTON_COMMAND2},
-	{BUTTON_UP3, BUTTON_DOWN3, BUTTON_COMMAND3},
-	{BUTTON_UP4, BUTTON_DOWN4, BUTTON_COMMAND4},
+	{BUTTON_DOWN1, BUTTON_UP1, BUTTON_COMMAND1},
+	{BUTTON_DOWN2, BUTTON_UP2, BUTTON_COMMAND2},
+	{BUTTON_DOWN3, BUTTON_UP3, BUTTON_COMMAND3},
+	{BUTTON_DOWN4, BUTTON_UP4, BUTTON_COMMAND4},
 }
 
 type ButtonEvent struct{
@@ -78,7 +78,7 @@ var initialized bool = false
 const motorspeed = 2800
 
 
-var debug bool = false
+var debug bool = true
 
 
 //		-----------------------  FUNCTION DECLERATIONS    -----------------------------------
@@ -97,7 +97,7 @@ func Init(hardwareEventChannel chan HardwareEvent ,delayInPolling time.Duration)
 	
 	// If initialized between floors, move down to nearest floor.
 	startingFloor := -1
-	if startingFloor = checkFloor(); floor == -1 {
+	if startingFloor = checkFloor(); startingFloor == -1 {
 		printDebug("Starting between floors, going down")
 		SetMotorDirection(DIR_DOWN)
 		for {
@@ -160,7 +160,7 @@ func buttonPolling(buttonChannel chan ButtonEvent, delayInPolling time.Duration)
 	for {
 		// Check if there are any new orders(buttons pressed).
 		for floor := 0; floor < N_FLOORS; floor ++ {
-			for buttonType := BUTTON_CALL_UP; buttonType < BUTTON_COMMAND + 1; buttonType++ {
+			for buttonType := BUTTON_CALL_DOWN; buttonType < BUTTON_COMMAND + 1; buttonType++ {
 				if checkButtonPressed(buttonType, floor) {
 					if !readingMatrix[floor][buttonType] {
 						readingMatrix[floor][buttonType] = true
@@ -210,9 +210,15 @@ func floorSensorPolling(floorChannel chan FloorSensorEvent, delayInPolling time.
 	for{
 		floor := checkFloor()
 		if (floor != -1) && (floor != lastFloor){
+			dir := 0
+			if lastFloor > floor{
+				dir = -1
+			} else if lastFloor < floor{
+				dir = 1
+			}
 			lastFloor = floor
 			setFloorIndicator(floor)
-			floorChannel <- FloorSensorEvent{Floor: floor} 
+			floorChannel <- FloorSensorEvent{Floor: floor, CurrentDirection: dir} 
 			}	
 		time.Sleep(delayInPolling)
 	}
@@ -365,7 +371,7 @@ func setStopLamp(value bool) {
 
 func resetLights() {
 	for f:=0;f< N_FLOORS;f++{
-		for b:= BUTTON_CALL_UP;b<N_BUTTONS;b++{
+		for b:= BUTTON_CALL_DOWN;b<N_BUTTONS;b++{
 			setButtonLight(f, b, false)
 		}
 	}

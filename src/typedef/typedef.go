@@ -1,6 +1,9 @@
 package typedef
 
-import "time"
+import(
+ "time"
+ "fmt"
+ )
 
 const N_FLOORS int = 4 // TODO -> Do this dynamically.
 const N_BUTTONS int = 3
@@ -17,8 +20,8 @@ const(
 // ------------- Enumerators
 // Hardware events
 const (
-	BUTTON_CALL_UP = iota
-	BUTTON_CALL_DOWN
+	BUTTON_CALL_DOWN = iota
+	BUTTON_CALL_UP
 	BUTTON_COMMAND
 	BUTTON_STOP
 	SENSOR_FLOOR
@@ -66,8 +69,8 @@ const (
 
 // ------------- String arrays for debugging.
 var HardwareEventType = []string{
-	"BUTTON_CALL_UP",
 	"BUTTON_CALL_DOWN",
+	"BUTTON_CALL_UP",
 	"BUTTON_COMMAND",
 	"BUTTON_STOP",
 	"SENSOR_FLOOR",
@@ -89,7 +92,7 @@ var EventType = []string{
 	"EventReceivedOrderFromElevator",
 	"EventReceivedBackupFromElevator",
 	"EventNoBackupWithinLimit",
-	"EventButtonPress",
+	"EventButtonPressed",
 	"EventFloorReached",
 	"EventSetMotor",
 	"EventSetLight",
@@ -193,9 +196,9 @@ func (e *Elevator) ShouldStop() bool {
 	case DIR_STOP:
 		return true;
 	case DIR_UP:
-		return !e.State.OrdersAbove() || e.State.ExternalOrders[floor][BUTTON_CALL_UP] || e.State.InternalOrders[floor] || floor == N_FLOORS-1
+		return !e.State.OrdersAbove() || e.State.ExternalOrders[BUTTON_CALL_UP][floor] || e.State.InternalOrders[floor] || floor == N_FLOORS-1
 	case DIR_DOWN:
-		return !e.State.OrdersBelow() || e.State.ExternalOrders[floor][BUTTON_CALL_DOWN] || e.State.InternalOrders[floor] || floor == 0
+		return !e.State.OrdersBelow() || e.State.ExternalOrders[BUTTON_CALL_DOWN][floor] || e.State.InternalOrders[floor] || floor == 0
 	}
 	return true
 }
@@ -218,6 +221,7 @@ func (e *Elevator) SetMoving(b bool){
 
 func (e *Elevator) GetNextDirection() int {
 	if !e.State.HaveOrders() {
+		fmt.Println("Internal queue" , e.State.InternalOrders)
 		return DIR_STOP
 	}
 
@@ -245,7 +249,8 @@ func (s StateStruct) IsMoving() bool{
 	return s.Moving
 }
 
-func (s StateStruct) SetDirection(dir int){
+func (s *StateStruct) SetDirection(dir int){
+	fmt.Println("Setting direction ", dir)
 	s.CurrentDirection = dir
 }
 
@@ -258,10 +263,8 @@ func (s StateStruct) OrdersAbove() bool {
 		if s.InternalOrders[floor]{
 			return true
 		}
-		for _, order := range s.ExternalOrders[floor] {
-			if order {
-				return true
-			}
+		if s.ExternalOrders[0][floor] || s.ExternalOrders[1][floor]{
+			return true
 		}
 	}
 	return false
@@ -278,6 +281,7 @@ func (s StateStruct) OrdersBelow() bool {
 	}
 	return false
 }
+
 
 func (s StateStruct) OrderAtCurrentFloor() bool {
 	floor := s.PrevFloor

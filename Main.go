@@ -25,6 +25,7 @@ import (
 	"./src/network"
 	. "./src/typedef"
 	"os"
+	"fmt"
 )
 
 const debug bool = true
@@ -32,7 +33,7 @@ const debug bool = true
 func main() {
 	
 	// Order id can be generated from IP address + some counting variable
-
+	fmt.Println("hi")
 
 	const pollingDelay = 50 * time.Millisecond
 	const connectionLimit = 5
@@ -127,6 +128,7 @@ func main() {
 
 					// Set the current state to the state received here.
 					localState.InternalOrders = extBackup.BackupData.CurrentState.InternalOrders
+					localState.CurrentDirection = DIR_STOP
 					hasRequestedBackup  = false
 					printDebug("Received backup from " + extBackup.SentFrom)
 				}
@@ -187,6 +189,7 @@ func main() {
 							// Do something with the order.
 							assignedIP := localIP //CostFunction.AssignNewOrder(knownElevators, activeElevators, button.Floor, button.Type)
 							var err error
+							fmt.Println("ButtonType: ", hwEvent.ButtonType)
 							order := OrderStruct{OrderID: locOrderID,
 												Floor: hwEvent.Floor,
 												Type: hwEvent.ButtonType,
@@ -196,13 +199,13 @@ func main() {
 								log.Fatal(err)
 							} else {
 								if assignedIP == localIP{
-									addOrderToThisElevator(*order, &localState, knownElevators, localIP)
+									addOrderToThisElevator(order, &localState, knownElevators, localIP)
+									hardware.SetLights(order.Type, order.Floor, true)
 									if localState.CurrentDirection == DIR_STOP{
 										localState.SetDirection(knownElevators[localIP].GetNextDirection())
 										localState.SetMoving(true)
 										knownElevators[localIP].State = localState
 										hardware.SetMotorDirection(localState.CurrentDirection)
-										hardware.SetLights(order.Type, order.Floor, true)
 									}
 									stateChanged = true
 								} else {
@@ -230,7 +233,7 @@ func main() {
 							localState.InternalOrders[hwEvent.Floor] = true
 							knownElevators[localIP].State = localState
 							if localState.CurrentDirection == DIR_STOP && !localState.OpenDoor{
-								localState.SetDirection(knownElevators[localIP].GetNextDirection())
+								(&localState).SetDirection(knownElevators[localIP].GetNextDirection())
 								localState.Moving = true
 								knownElevators[localIP].State = localState
 								hardware.SetMotorDirection(localState.CurrentDirection)
@@ -251,34 +254,38 @@ func main() {
 					}
 				
 				// A floor is reached	
-		case EventFloorReached:
-			// Reached a floor
-			printDebug(localIP + " Reached floor: " + strconv.Itoa(hwEvent.Floor))
-			localState.PrevFloor = hwEvent.Floor
-			knownElevators[localIP].State = localState
-			if knownElevators[localIP].ShouldStop(){
-				
-				// We are stopping at this floor
-				hardware.SetMotorDirection(DIR_STOP)
-				localState.SetMoving(false)
-				localState.SetDirection(DIR_STOP)
-	
-				printDebug("Opening doors")
-				doorTimer.Reset(doorOpentime)
-				hardware.SetLights(DOOR_LAMP, 0, true)
-				
-				localState.InternalOrders[hwEvent.Floor] = false
-				hardware.SetLights(BUTTON_COMMAND, hwEvent.Floor, false)
-				if hwEvent.CurrentDirection == DIR_DOWN { 
-					localState.ExternalOrders[0][hwEvent.Floor] = false
-					hardware.SetLights(BUTTON_CALL_DOWN, hwEvent.Floor, false)
-				} else if hwEvent.CurrentDirection == DIR_UP {
-					localState.ExternalOrders[1][hwEvent.Floor] = false
-					hardware.SetLights(BUTTON_CALL_UP, hwEvent.Floor, false)
-				}
+			case EventFloorReached:
+				// Reached a floor
+				printDebug(localIP + " Reached floor: " + strconv.Itoa(hwEvent.Floor))
+				localState.PrevFloor = hwEvent.Floor
 				knownElevators[localIP].State = localState
+				if knownElevators[localIP].ShouldStop(){
+					
+					// We are stopping at this floor
+					hardware.SetMotorDirection(DIR_STOP)
+					localState.SetMoving(false)
+					localState.SetDirection(DIR_STOP)
+		
+					printDebug("Opening doors")
+					doorTimer.Reset(doorOpentime)
+					hardware.SetLights(DOOR_LAMP, 0, true)
+					
+					localState.InternalOrders[hwEvent.Floor] = false
+					hardware.SetLights(BUTTON_COMMAND, hwEvent.Floor, false)
+					fmt.Println("Had direction: 	", hwEvent.CurrentDirection)
+					if hwEvent.CurrentDirection == DIR_DOWN || (hwEvent.CurrentDirection == DIR_UP && !localState.OrdersAbove()) { 
+						localState.ExternalOrders[0][hwEvent.Floor] = false
+						fmt.Println("aaa")
+						hardware.SetLights(BUTTON_CALL_DOWN, hwEvent.Floor, false)
+					}
+					if hwEvent.CurrentDirection == DIR_UP || (hwEvent.CurrentDirection == DIR_DOWN && !localState.OrdersBelow()) {
+						localState.ExternalOrders[1][hwEvent.Floor] = false
+						hardware.SetLights(BUTTON_CALL_UP, hwEvent.Floor, false)
+						fmt.Println("bbb")
+					}
+					knownElevators[localIP].State = localState
+				}
 			}
-		}
 
 		// Order events
 		case extOrder := <-receiveOrderChannel:
@@ -328,13 +335,15 @@ func main() {
 			
 		// Backup
 		case extBackup := <- receiveBackupChannel:
-			printDebug("Received an " + EventType[extBackup.Event] + " from " + extBackup.SentFrom)
+			if extBackup.Event != EventStillOnline{
+				printDebug("Received an " + EventType[extBackup.Event] + " from " + extBackup.SentFrom)
+			}
 			
 			switch extBackup.Event{
 
 				// Received new backupData, or confirmation that still online
 				case EventSendBackupToAll, EventStillOnline:
-					if extBackup.Event == EventSendBackupToAll{
+					if extBackup.Event == EventSendBackupToAll && extBackup.SentFrom != localIP{
 						// Received updated state
 						waitingBackups[extBackup.SentFrom] = &extBackup.BackupData
 						waitingBackups[extBackup.SentFrom].BackupTime = time.Now()
@@ -375,11 +384,12 @@ func main() {
 			
 		// Timers
 		case <- confirmOnlineTicker.C:
-			if stateChanged{
+			if stateChanged {
 				sendBackupChannel <- ExtBackupStruct{Event: EventSendBackupToAll,
 													 SentFrom: localIP,
 													 BackupData: BackupStruct{CurrentState: localState,},
 													}
+				stateChanged = false
 			} else {
 				sendBackupChannel <- ExtBackupStruct{Event: EventStillOnline,
 													SentFrom: localIP,
@@ -445,7 +455,7 @@ func main() {
 		case <- doorTimer.C:
 			printDebug("Closing door ")
 			knownElevators[localIP].State.OpenDoor = false
-			hardware.SetLights(hardware.LightEvent{LightType: DOOR_LAMP, Value: false})
+			hardware.SetLights(DOOR_LAMP, 0, false)
 
 			// Check if we should start to move
 			if knownElevators[localIP].State.HaveOrders(){
@@ -453,7 +463,7 @@ func main() {
 				knownElevators[localIP].SetMoving(knownElevators[localIP].State.CurrentDirection != DIR_STOP)
 				localState = knownElevators[localIP].State
 				printDebug("Going " + MotorDirections[knownElevators[localIP].State.CurrentDirection + 1])
-				hardware.SetLights(hardware.LightEvent{Floor: knownElevators[localIP].State.PrevFloor, LightType: BUTTON_COMMAND, Value: false})
+				hardware.SetLights(BUTTON_COMMAND, knownElevators[localIP].State.PrevFloor, false)
 				hardware.SetMotorDirection(knownElevators[localIP].State.CurrentDirection)
 			} else {
 				printDebug("Nothing to do")
@@ -513,9 +523,9 @@ func addOrderToThisElevator(order OrderStruct, localState *StateStruct, knownEle
 			localState.ExternalOrders[0][order.Floor] = true
 		case BUTTON_CALL_UP:
 			localState.ExternalOrders[1][order.Floor] = true
-	
 	}
-	knownElevator[localIP].State = localState
+	fmt.Println("New Order:	", localState.ExternalOrders)
+	knownElevator[localIP].State = *localState
 }
 
 func allOtherAccBackup(backupAcknowledgementList, activeElevators map[string]bool) bool {
