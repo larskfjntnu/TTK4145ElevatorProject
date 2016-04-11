@@ -19,6 +19,7 @@ package main
 import (
 	"time"
 	"log"
+	"./src/costFunction"
 	"strconv"
 	"strings"
 	"./src/hardware"
@@ -187,9 +188,10 @@ func main() {
 							printDebug("Cannot accept external order while offline.")
 						} else {
 							// Do something with the order.
-							assignedIP := localIP //CostFunction.AssignNewOrder(knownElevators, activeElevators, button.Floor, button.Type)
-							var err error
-							fmt.Println("ButtonType: ", hwEvent.ButtonType)
+							fmt.Println(activeElevators[localIP])
+							fmt.Println(knownElevators[localIP])
+							assignedIP, err := costFunction.CalculateRespondingElevator(knownElevators, activeElevators, hwEvent.ButtonType, hwEvent.Floor)
+							fmt.Println("Assigned to: 	" + assignedIP)
 							order := OrderStruct{OrderID: locOrderID,
 												Floor: hwEvent.Floor,
 												Type: hwEvent.ButtonType,

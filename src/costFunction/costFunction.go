@@ -18,62 +18,88 @@ package costFunction
 	to go as arguments and calculates the optimal (at least we hope it does)
 	elevator to respond to the call.
 */
-func calculateRespondingElevator(knownElevators map[string]*Elevator, activeElevators [string]bool, orderType, floor int) (assignedTo string, floor, type int) {
-	if orderType != (BUTTON_CALL_DOWN || BUTTON_CALL_UP){
-		return "", fmt.Errorf("Invalid ordeType")
+func CalculateRespondingElevator(knownElevators (map[string]*Elevator), activeElevators map[string]bool, orderType, floor int) (assignedTo string, err error) {
+
+	if (orderType == BUTTON_CALL_DOWN) && (orderType == BUTTON_CALL_UP){
+		return "", fmt.Errorf("Invalid orderType")
 	}
-	if floor < 0 || floor > N_FLOOR - 1{
-		return "", fmt.ErrorF("Invalid floor")
+	if (floor < 0) || (floor > N_FLOORS - 1) {
+		return "", fmt.Errorf("Invalid floor")
 	}
-	// TODO -> Implement some algorithm to calculate the optimal elevator
+
 	lowestCost := 100000
-	respondingElevator := 0
+	respondingElevator := ""
 	for IP, active := range(activeElevators){
-
 		if active{
-			queue = knownElevators[IP].State.ExternalOrders // Gets a copy of the queue matrix for the current active elevator
-			prevFloor := knownElevators[IP].State.PrevFloor
-			direction := knownElevators[IP].State.CurrentDirection
-			moving := knownElevators[IP].IsMoving()
+			tempElevatorObj := *knownElevators[IP] // Gets a copy of the queue matrix for the current active elevator
+			tempElevator := &tempElevatorObj
 
-			var orderDir int
+			if tempElevator.State.PrevFloor == floor && !tempElevator.State.HaveOrders(){
+				return IP, nil
+			} 
 
-			//prevFloor, currentFloor, direction = knownElevators[activeElevators[n,2]] 
+			if tempElevator.State.PrevFloor == floor && !tempElevator.IsMoving() && ((tempElevator.GetNextDirection() == DIR_UP && orderType == BUTTON_CALL_UP) || (tempElevator.GetNextDirection() == DIR_DOWN && orderType == BUTTON_CALL_DOWN)) {
+				return IP, nil
+			}
 
+			if floor == 0 && tempElevator.State.PrevFloor == 0 && !tempElevator.IsMoving(){
+				return IP, nil
+			}
+
+			if floor == N_FLOORS-1 && tempElevator.State.PrevFloor == N_FLOORS-1 && !tempElevator.IsMoving(){
+				return IP, nil
+			}
+
+
+
+			// Insert new order for testing
+			tempElevator.State.ExternalOrders[orderType][floor] = true
 			cost := 0
-			//elevatorIp = activeElevators[n]
-			// Tar ikke med det caset der heisen er allerede i beordret etasje i tilfelle vi har en annen ordning for det
-			if moving { // elevator between floors and a shortert travel to next floor
+
+
+			if tempElevator.IsMoving() { // Shorter travel to next floor
 				cost++
-			}
-			else{
+			} else {
 				cost += 2
 			}
-			currentFloor := prevFloor
-			for m := 0, m < 2*N_FLOOR, m++{
-				nextFloor := knownElevators[IP].GetNextDirection(direction, currentFloor)
+			costloop:
+			for m := 0; m < 2*N_FLOORS; m++{
+
+				dir := tempElevator.GetNextDirection()
+				tempElevator.State.PrevFloor = tempElevator.State.PrevFloor + dir
+				tempElevator.SetDirection(dir)
 				cost += 2
-				if direction == orderType & currentFloor == floor{//Dette er etasjen som er bestilt
+
+				fmt.Println(tempElevator.State)
+				if ((orderType == BUTTON_CALL_UP && dir == DIR_UP) || (orderType == BUTTON_CALL_DOWN && dir == DIR_DOWN)) && tempElevator.State.PrevFloor == floor{
+					// We have arrived at the ordered floor
 					 if cost < lowestCost{
 					 	lowestCost = cost
 					 	respondingElevator = IP
-					 	break
+					 	break costloop
 					 }
-				}
-				else if shouldStop(direction, currentFloor){// går ut fra at vi lager en slik funksjon, dette er for ordre som allerede eksisterer for heisen
-					queue[floor][internal] = 0
-					queue[floor][direction] = 0
+				} else if tempElevator.State.PrevFloor == floor && !tempElevator.State.HaveOrders() {
+					// We have arrived at the ordered floor
+					 if cost < lowestCost{
+					 	lowestCost = cost
+					 	respondingElevator = IP
+					 	break costloop
+					 }
+				} else if tempElevator.ShouldStop(){
+					tempElevator.State.InternalOrders[tempElevator.State.PrevFloor] = false
+					i := 0
+					if dir == DIR_DOWN{
+						i = 1
+					}
+					tempElevator.State.ExternalOrders[i][tempElevator.State.PrevFloor] = false
 					cost += 2
 				}
 			}
 		}
-		if respondingElevator!= 0{
-			return respondingElevator, floor, buttonType
-		}
 	}
-}
-
-func newFloor(direction, currentFloor) int{
-	//calculate new floor and direction according to the current direction, floor and the queue
-
+	if respondingElevator == ""{
+		return "", fmt.Errorf("Error, no elevator found..")
+	} else {
+		return respondingElevator, nil
+	}
 }
