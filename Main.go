@@ -191,6 +191,7 @@ func main() {
 							fmt.Println(activeElevators[localIP])
 							fmt.Println(knownElevators[localIP])
 							assignedIP, err := costFunction.CalculateRespondingElevator(knownElevators, activeElevators, hwEvent.ButtonType, hwEvent.Floor)
+							
 							fmt.Println("Assigned to: 	" + assignedIP)
 							order := OrderStruct{OrderID: locOrderID,
 												Floor: hwEvent.Floor,

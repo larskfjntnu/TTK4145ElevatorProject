@@ -20,6 +20,7 @@ package costFunction
 */
 func CalculateRespondingElevator(knownElevators (map[string]*Elevator), activeElevators map[string]bool, orderType, floor int) (assignedTo string, err error) {
 
+	fmt.Println("COST:	Calculating cost to ", HardwareEventType[orderType], " floor ", floor)
 	if (orderType == BUTTON_CALL_DOWN) && (orderType == BUTTON_CALL_UP){
 		return "", fmt.Errorf("Invalid orderType")
 	}
@@ -50,8 +51,6 @@ func CalculateRespondingElevator(knownElevators (map[string]*Elevator), activeEl
 				return IP, nil
 			}
 
-
-
 			// Insert new order for testing
 			tempElevator.State.ExternalOrders[orderType][floor] = true
 			cost := 0
@@ -64,15 +63,16 @@ func CalculateRespondingElevator(knownElevators (map[string]*Elevator), activeEl
 			}
 			costloop:
 			for m := 0; m < 2*N_FLOORS; m++{
-
+				prevDir:= tempElevator.State.CurrentDirection
 				dir := tempElevator.GetNextDirection()
 				tempElevator.State.PrevFloor = tempElevator.State.PrevFloor + dir
+				fmt.Println("COST: 	Direction: ", MotorDirections[dir+1], "	NextFloor: ", tempElevator.State.PrevFloor)
 				tempElevator.SetDirection(dir)
 				cost += 2
 
-				fmt.Println(tempElevator.State)
 				if ((orderType == BUTTON_CALL_UP && dir == DIR_UP) || (orderType == BUTTON_CALL_DOWN && dir == DIR_DOWN)) && tempElevator.State.PrevFloor == floor{
 					// We have arrived at the ordered floor
+					fmt.Println("COST: 	Arrived at ordered floor")
 					 if cost < lowestCost{
 					 	lowestCost = cost
 					 	respondingElevator = IP
@@ -80,15 +80,34 @@ func CalculateRespondingElevator(knownElevators (map[string]*Elevator), activeEl
 					 }
 				} else if tempElevator.State.PrevFloor == floor && !tempElevator.State.HaveOrders() {
 					// We have arrived at the ordered floor
+					fmt.Println("COST: 	No orders")
+					 if cost < lowestCost{
+					 	lowestCost = cost
+					 	respondingElevator = IP
+					 	break costloop
+					 }
+				} else if (tempElevator.State.PrevFloor == 0 && floor == 0) || (tempElevator.State.PrevFloor == N_FLOORS-1 && floor == N_FLOORS-1){
+					// We have arrived at the ordered floor
+					fmt.Println("COST: 	Arrived at ordered floor")
+					 if cost < lowestCost{
+					 	lowestCost = cost
+					 	respondingElevator = IP
+					 	break costloop
+					 }
+				} else if tempElevator.State.PrevFloor == floor && ((prevDir == DIR_DOWN && orderType == BUTTON_CALL_DOWN) || (prevDir == DIR_UP && orderType == BUTTON_CALL_UP)){
+					// We have arrived at the ordered floor
+					fmt.Println("COST: 	Arrived at ordered floor")
 					 if cost < lowestCost{
 					 	lowestCost = cost
 					 	respondingElevator = IP
 					 	break costloop
 					 }
 				} else if tempElevator.ShouldStop(){
+					fmt.Println("COST: 	Stopped at floor")
+					tempElevator.SetDirection(DIR_STOP)
 					tempElevator.State.InternalOrders[tempElevator.State.PrevFloor] = false
 					i := 0
-					if dir == DIR_DOWN{
+					if prevDir == DIR_DOWN{
 						i = 1
 					}
 					tempElevator.State.ExternalOrders[i][tempElevator.State.PrevFloor] = false
