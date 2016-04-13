@@ -27,8 +27,8 @@ const debug = false
 func Init(receiveOrderChannel chan ExtOrderStruct, receiveChannel chan ExtBackupStruct,
 	sendOrderChannel chan ExtOrderStruct, sendChannel chan ExtBackupStruct) (localIP string, err error) {
 	const messageSize = 4 * 1024
-	const UDPLocalListenPort = 22301
-	const UDPBroadcastListenPort = 22302
+	const UDPLocalListenPort = 9907
+	const UDPBroadcastListenPort = 9908
 	UDPSendChannel := make(chan udp.UDPMessage, 10)
 	UDPReceiveChannel := make(chan udp.UDPMessage)
 	localIP, err = udp.Init(UDPLocalListenPort, UDPBroadcastListenPort, messageSize, UDPSendChannel, UDPReceiveChannel)

@@ -18,9 +18,9 @@ package costFunction
 	to go as arguments and calculates the optimal (at least we hope it does)
 	elevator to respond to the call.
 */
-func CalculateRespondingElevator(knownElevators (map[string]*Elevator), activeElevators map[string]bool, orderType, floor int) (assignedTo string, err error) {
+func CalculateRespondingElevator(knownElevators (map[string]*Elevator), activeElevators map[string]bool, localIP string, orderType, floor int) (assignedTo string, err error) {
 
-	fmt.Println("COST:	Calculating cost to ", HardwareEventType[orderType], " floor ", floor)
+	
 	if (orderType == BUTTON_CALL_DOWN) && (orderType == BUTTON_CALL_UP){
 		return "", fmt.Errorf("Invalid orderType")
 	}
@@ -31,7 +31,8 @@ func CalculateRespondingElevator(knownElevators (map[string]*Elevator), activeEl
 	lowestCost := 100000
 	respondingElevator := ""
 	for IP, active := range(activeElevators){
-		if active{
+		//fmt.Println("COST:	Calculating cost to ", HardwareEventType[orderType], " floor ", floor, " for ", IP)
+		if active || IP == localIP {
 			tempElevatorObj := *knownElevators[IP] // Gets a copy of the queue matrix for the current active elevator
 			tempElevator := &tempElevatorObj
 
@@ -66,13 +67,21 @@ func CalculateRespondingElevator(knownElevators (map[string]*Elevator), activeEl
 				prevDir:= tempElevator.State.CurrentDirection
 				dir := tempElevator.GetNextDirection()
 				tempElevator.State.PrevFloor = tempElevator.State.PrevFloor + dir
-				fmt.Println("COST: 	Direction: ", MotorDirections[dir+1], "	NextFloor: ", tempElevator.State.PrevFloor)
+				//fmt.Println("COST: 	Direction: ", MotorDirections[dir+1], "	NextFloor: ", tempElevator.State.PrevFloor)
 				tempElevator.SetDirection(dir)
 				cost += 2
 
 				if ((orderType == BUTTON_CALL_UP && dir == DIR_UP) || (orderType == BUTTON_CALL_DOWN && dir == DIR_DOWN)) && tempElevator.State.PrevFloor == floor{
 					// We have arrived at the ordered floor
-					fmt.Println("COST: 	Arrived at ordered floor")
+					//fmt.Println("COST: 	Arrived at ordered floor")
+					 if cost < lowestCost{
+					 	lowestCost = cost
+					 	respondingElevator = IP
+					 	break costloop
+					 }
+				} else if tempElevator.State.PrevFloor == floor && dir == DIR_STOP{
+					// We have arrived at the ordered floor
+					//fmt.Println("COST: 	Arrived at floor, No orders")
 					 if cost < lowestCost{
 					 	lowestCost = cost
 					 	respondingElevator = IP
@@ -80,7 +89,7 @@ func CalculateRespondingElevator(knownElevators (map[string]*Elevator), activeEl
 					 }
 				} else if tempElevator.State.PrevFloor == floor && !tempElevator.State.HaveOrders() {
 					// We have arrived at the ordered floor
-					fmt.Println("COST: 	No orders")
+					//fmt.Println("COST: 	Arrived at ordered floor, no orders")
 					 if cost < lowestCost{
 					 	lowestCost = cost
 					 	respondingElevator = IP
@@ -88,7 +97,7 @@ func CalculateRespondingElevator(knownElevators (map[string]*Elevator), activeEl
 					 }
 				} else if (tempElevator.State.PrevFloor == 0 && floor == 0) || (tempElevator.State.PrevFloor == N_FLOORS-1 && floor == N_FLOORS-1){
 					// We have arrived at the ordered floor
-					fmt.Println("COST: 	Arrived at ordered floor")
+					//fmt.Println("COST: 	Arrived at ordered floor, bottom or top")
 					 if cost < lowestCost{
 					 	lowestCost = cost
 					 	respondingElevator = IP
@@ -96,14 +105,14 @@ func CalculateRespondingElevator(knownElevators (map[string]*Elevator), activeEl
 					 }
 				} else if tempElevator.State.PrevFloor == floor && ((prevDir == DIR_DOWN && orderType == BUTTON_CALL_DOWN) || (prevDir == DIR_UP && orderType == BUTTON_CALL_UP)){
 					// We have arrived at the ordered floor
-					fmt.Println("COST: 	Arrived at ordered floor")
+					//fmt.Println("COST: 	Arrived at ordered floor, right direction")
 					 if cost < lowestCost{
 					 	lowestCost = cost
 					 	respondingElevator = IP
 					 	break costloop
 					 }
 				} else if tempElevator.ShouldStop(){
-					fmt.Println("COST: 	Stopped at floor")
+					//fmt.Println("COST: 	Stopped at floor")
 					tempElevator.SetDirection(DIR_STOP)
 					tempElevator.State.InternalOrders[tempElevator.State.PrevFloor] = false
 					i := 0

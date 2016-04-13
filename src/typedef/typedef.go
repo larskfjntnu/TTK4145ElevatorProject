@@ -2,7 +2,6 @@ package typedef
 
 import(
  "time"
- "fmt"
  )
 
 const N_FLOORS int = 4 // TODO -> Do this dynamically.
@@ -168,14 +167,18 @@ type ExtBackupStruct struct {
 
 
 func (e ExtBackupStruct) Valid() bool {
-	ex := e.BackupData.CurrentState.ExternalOrders
-	in := e.BackupData.CurrentState.InternalOrders
-	if len(ex[0]) != N_FLOORS || len(ex[1]) != N_FLOORS || len(in) != N_FLOORS {
-		return false
-	}
-	if e.BackupData.CurrentState.LocalIP != e.SentFrom {
-		return false
-	}
+	// ex := e.BackupData.CurrentState.ExternalOrders
+	// in := e.BackupData.CurrentState.InternalOrders
+	// if e.Event == EventSendBackupToAll{
+	// 	fmt.Println("Received backup: ", e.BackupData.CurrentState)
+	// 	if len(ex[0]) != N_FLOORS || len(ex[1]) != N_FLOORS || len(in) != N_FLOORS {
+	// 		return false
+	// 	}
+	// 	if e.BackupData.CurrentState.LocalIP != e.SentFrom {
+	// 		return false
+	// 	}
+	// }
+	
 	return true
 }
 
@@ -221,7 +224,6 @@ func (e *Elevator) SetMoving(b bool){
 
 func (e *Elevator) GetNextDirection() int {
 	if !e.State.HaveOrders() {
-		fmt.Println("Internal queue" , e.State.InternalOrders)
 		return DIR_STOP
 	}
 
@@ -250,7 +252,6 @@ func (s StateStruct) IsMoving() bool{
 }
 
 func (s *StateStruct) SetDirection(dir int){
-	fmt.Println("Setting direction ", dir)
 	s.CurrentDirection = dir
 }
 

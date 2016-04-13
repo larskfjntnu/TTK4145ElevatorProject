@@ -78,7 +78,7 @@ var initialized bool = false
 const motorspeed = 2800
 
 
-var debug bool = true
+var debug bool = false
 
 
 //		-----------------------  FUNCTION DECLERATIONS    -----------------------------------
