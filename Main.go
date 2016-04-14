@@ -19,7 +19,7 @@ package main
 import (
 	"time"
 	"log"
-	"./src/costFunction"
+	"./src/costFunction1"
 	"strconv"
 	"strings"
 	"./src/hardwareSim"
@@ -191,7 +191,7 @@ func main() {
 							printDebug("Cannot accept external order while offline.")
 						} else {
 							// Do something with the order.
-							assignedIP, err := costFunction.CalculateRespondingElevator(knownElevators, activeElevators, localIP, hwEvent.ButtonType, hwEvent.Floor)
+							assignedIP, err := costFunction1.CalculateRespondingElevator(knownElevators, activeElevators, localIP, hwEvent.ButtonType, hwEvent.Floor)
 							order := OrderStruct{OrderID: locOrderID,
 												Floor: hwEvent.Floor,
 												Type: hwEvent.ButtonType,
@@ -420,7 +420,7 @@ func main() {
 			for orderID, order := range(dispatchedOrders){
 				if time.Since(order.DispatchedTime) > dispatchOrderTimeout{
 					printDebug("Dispatched order timed out, reassigning id: " + strconv.Itoa(orderID))
-					assignedIP, err := costFunction.CalculateRespondingElevator(knownElevators, activeElevators, localIP, order.Type, order.Floor)
+					assignedIP, err := costFunction1.CalculateRespondingElevator(knownElevators, activeElevators, localIP, order.Type, order.Floor)
 					order := dispatchedOrders[orderID]
 					order.OrderID = locOrderID
 					locOrderID = locOrderID + 1
