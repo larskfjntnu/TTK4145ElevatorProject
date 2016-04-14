@@ -22,7 +22,7 @@ import (
 	"./src/costFunction"
 	"strconv"
 	"strings"
-	"./src/hardware"
+	"./src/hardwareSim"
 	"./src/network"
 	. "./src/typedef"
 	"os"
@@ -32,7 +32,7 @@ const debug bool = true
 
 func main() {
 	defer func(){
-		hardware.SetMotorDirection(DIR_STOP)
+		hardwareSim.SetMotorDirection(DIR_STOP)
 	}()
 	// Order id can be generated from IP address + some counting variable
 
@@ -70,7 +70,7 @@ func main() {
 
 	// Initializing hardware
 	hardwareChannel := make(chan HardwareEvent, 10)
-	if err := hardware.Init(hardwareChannel, pollingDelay); err != nil {
+	if err := hardwareSim.Init(hardwareChannel, pollingDelay); err != nil {
 		printDebug("Hardware Initializing failed")
 		log.Fatal(err)
 	} else {
@@ -227,7 +227,7 @@ func main() {
 							openDoor(doorTimer, doorOpentime, knownElevators, localIP)
 						} else {
 							knownElevators[localIP].SetInternalOrder(hwEvent.Floor, true)
-							hardware.SetLights(hwEvent.ButtonType, hwEvent.Floor, true)
+							hardwareSim.SetLights(hwEvent.ButtonType, hwEvent.Floor, true)
 							if knownElevators[localIP].GetDirection() == DIR_STOP && !knownElevators[localIP].DoorOpen(){
 								startMoving(knownElevators, localIP)
 							}
@@ -237,7 +237,7 @@ func main() {
 
 					// Stop button pressed, can perhaps remove this?
 					case BUTTON_STOP:
-						hardware.SetMotorDirection(DIR_STOP)
+						hardwareSim.SetMotorDirection(DIR_STOP)
 						printDebug("\n\n\n")
 						printDebug("Elevator was killed\n\n\n")
 						time.Sleep(300*time.Millisecond)
@@ -260,7 +260,7 @@ func main() {
 					openDoor(doorTimer, doorOpentime, knownElevators, localIP)
 					
 					knownElevators[localIP].SetInternalOrder(hwEvent.Floor, false)
-					hardware.SetLights(BUTTON_COMMAND, hwEvent.Floor, false)
+					hardwareSim.SetLights(BUTTON_COMMAND, hwEvent.Floor, false)
 					if hwEvent.CurrentDirection == DIR_DOWN || (hwEvent.CurrentDirection == DIR_UP && !knownElevators[localIP].State.OrdersAbove()) { 
 						editOrderOnThisElevator(hwEvent.Floor, BUTTON_CALL_DOWN, false, knownElevators, localIP)
 					}
@@ -445,7 +445,7 @@ func main() {
 		case <- doorTimer.C:
 			printDebug("Closing door ")
 			knownElevators[localIP].State.OpenDoor = false
-			hardware.SetLights(DOOR_LAMP, 0, false)
+			hardwareSim.SetLights(DOOR_LAMP, 0, false)
 
 			// Check if we should start to move
 			if knownElevators[localIP].State.HaveOrders(){
@@ -514,7 +514,7 @@ func editOrderOnThisElevator(floor, typ int, add bool, knownElevators map[string
 		case BUTTON_CALL_UP:
 			knownElevators[localIP].State.ExternalOrders[1][floor] = add
 	}
-	hardware.SetLights(typ, floor, add)
+	hardwareSim.SetLights(typ, floor, add)
 }
 
 func allOtherAccBackup(backupAcknowledgementList, activeElevators map[string]bool) bool {
@@ -540,22 +540,22 @@ func otherActiveElevators(activeElevators map[string]bool, localIP string) bool 
 
 func openDoor(doorTimer *time.Timer, doorOpentime time.Duration, knownElevators map[string]*Elevator, localIP string){
 	doorTimer.Reset(doorOpentime)
-	hardware.SetLights(DOOR_LAMP, 0, true)
+	hardwareSim.SetLights(DOOR_LAMP, 0, true)
 	knownElevators[localIP].State.OpenDoor = true
 }
 
 func startMoving(knownElevators map[string]*Elevator, localIP string){
 	knownElevators[localIP].SetDirection(knownElevators[localIP].GetNextDirection())
 	knownElevators[localIP].SetMoving(knownElevators[localIP].State.CurrentDirection != DIR_STOP)
-	hardware.SetLights(BUTTON_COMMAND, knownElevators[localIP].State.PrevFloor, false)
-	hardware.SetMotorDirection(knownElevators[localIP].State.CurrentDirection)
+	hardwareSim.SetLights(BUTTON_COMMAND, knownElevators[localIP].State.PrevFloor, false)
+	hardwareSim.SetMotorDirection(knownElevators[localIP].State.CurrentDirection)
 }
 
 func stopMoving(knownElevators map[string]*Elevator, localIP string, floor int){
-	hardware.SetMotorDirection(DIR_STOP)
+	hardwareSim.SetMotorDirection(DIR_STOP)
 	knownElevators[localIP].SetMoving(false)
 	knownElevators[localIP].SetDirection(DIR_STOP)
-	hardware.SetLights(BUTTON_COMMAND, floor, false)
+	hardwareSim.SetLights(BUTTON_COMMAND, floor, false)
 }
 
 /*

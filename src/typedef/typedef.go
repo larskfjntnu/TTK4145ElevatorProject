@@ -283,12 +283,12 @@ func (e *Elevator) MakeQueue() string{
 	str:= "----------------------------------\n"
 	str+= "\t\t    | Floor: |  0  |  1  |  2  |  3  |\n"
 	str+= "\t\t    ----------------------------------\n"
-	str+= fmt.Sprintf("\t\t    | Cab:   |  %s  |  %s  |  %s  |  %s  |\n", inTemp[0], inTemp[1], inTemp[2], inTemp[3])
+	str+= fmt.Sprintf("\t\t    | UP:    |  %s  |  %s  |  %s  |     |\n", exTempUp[0], exTempUp[1], exTempUp[2])
 	str+= "\t\t    ----------------------------------\n"
 	str+= fmt.Sprintf("\t\t    | DOWN:  |     |  %s  |  %s  |  %s  |\n", exTempDown[1], exTempDown[2], exTempDown[3])
 	str+= "\t\t    ----------------------------------\n"
-	str+= fmt.Sprintf("\t\t    | UP:    |  %s  |  %s  |  %s  |     |\n", exTempUp[0], exTempUp[1], exTempUp[2])
-
+	str+= fmt.Sprintf("\t\t    | Cab:   |  %s  |  %s  |  %s  |  %s  |\n", inTemp[0], inTemp[1], inTemp[2], inTemp[3])
+	
 	return str
 }
 
