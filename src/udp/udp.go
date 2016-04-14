@@ -111,7 +111,7 @@ func udpTransmitServer(loccon, bccon *net.UDPConn, localListenPort, bcListenPort
 				printDebug(strconv.Itoa(n))
 				if (err != nil || n < 0) {
 					printDebug("Error ending broadcast message")
-					log.Println(err)
+					log.Fatal(err)
 				}
 			} else {
 				raddr, err := net.ResolveUDPAddr("udp4", message.RAddress + ":" + strconv.Itoa(localListenPort))
@@ -121,7 +121,7 @@ func udpTransmitServer(loccon, bccon *net.UDPConn, localListenPort, bcListenPort
 				}
 				if n, err := loccon.WriteToUDP(message.Data, raddr); err != nil || n < 0 {
 					printDebug("TransmitServer:\t Error sending p2p message")
-					log.Println("UDP:\t",err)
+					log.Fatal(err)
 				}
 			}
 		}

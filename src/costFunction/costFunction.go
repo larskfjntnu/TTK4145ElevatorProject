@@ -21,7 +21,7 @@ package costFunction
 func CalculateRespondingElevator(knownElevators (map[string]*Elevator), activeElevators map[string]bool, localIP string, orderType, floor int) (assignedTo string, err error) {
 
 	
-	if (orderType == BUTTON_CALL_DOWN) && (orderType == BUTTON_CALL_UP){
+	if !(orderType >= 0 && orderType <= 1){
 		return "", fmt.Errorf("Invalid orderType")
 	}
 	if (floor < 0) || (floor > N_FLOORS - 1) {
@@ -49,6 +49,10 @@ func CalculateRespondingElevator(knownElevators (map[string]*Elevator), activeEl
 			}
 
 			if floor == N_FLOORS-1 && tempElevator.State.PrevFloor == N_FLOORS-1 && !tempElevator.IsMoving(){
+				return IP, nil
+			}
+
+			if tempElevator.State.ExternalOrders[orderType][floor] {
 				return IP, nil
 			}
 
