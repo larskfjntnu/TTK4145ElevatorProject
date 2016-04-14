@@ -35,7 +35,7 @@ func Init(receiveOrderChannel chan ExtOrderStruct, receiveChannel chan ExtBackup
 	if err != nil {
 		return "", err
 	}
-	go receiveOrderAndBackupServer(receiveOrderChannel, receiveChannel, UDPReceiveChannel)
+	go receiveOrderAndBackupServer(receiveOrderChannel, receiveChannel, UDPReceiveChannel, localIP)
 	go sendOrderAndBackupHandler(sendOrderChannel, sendChannel, UDPSendChannel)
 	return localIP, nil
 }
@@ -48,7 +48,7 @@ func Init(receiveOrderChannel chan ExtOrderStruct, receiveChannel chan ExtBackup
 	to the main module.(Make generic interface which supports extracting received messages.)
 	The receive channel is where these messages are passed to the calling module.
 */
-func receiveOrderAndBackupServer(receiveOrderChannel chan ExtOrderStruct, receiveBackupChannel chan ExtBackupStruct, UDPReceiveChannel <-chan udp.UDPMessage) {
+func receiveOrderAndBackupServer(receiveOrderChannel chan ExtOrderStruct, receiveBackupChannel chan ExtBackupStruct, UDPReceiveChannel <-chan udp.UDPMessage, localIP string) {
 	for {
 		select {
 		case message := <-UDPReceiveChannel:
@@ -75,7 +75,7 @@ func receiveOrderAndBackupServer(receiveOrderChannel chan ExtOrderStruct, receiv
 				} else if eventNum >= 3 && eventNum <= 8 {
 					var newExtBackup = ExtBackupStruct{}
 					if err := json.Unmarshal(message.Data[:message.Length], &newExtBackup); err == nil {
-						if newExtBackup.Valid() {
+						if newExtBackup.Valid(localIP) {
 							receiveBackupChannel <- newExtBackup
 							printDebug("Received an ExtBackupStruct with Event: " + EventType[newExtBackup.Event])
 						} else {
