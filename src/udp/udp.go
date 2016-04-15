@@ -31,7 +31,7 @@ type UDPMessage struct{
 	if any. It takes in all the necessary channels (send and receive) from its calling routine, enabling
 	interaction between the servers and other routines in the program.
 */
-func Init(localListenPort, broadcastListenPort, messageSize int, sendChannel <- chan UDPMessage, receiveChannel chan<- UDPMessage) (localIp string, err error){
+func Init(localListenPort, broadcastListenPort, messageSize int, sendChannel <- chan UDPMessage, receiveChannel chan<- UDPMessage, errorChannel chan<- bool) (localIp string, err error){
 	// Generate broadcast address
 	bcAddr, err := net.ResolveUDPAddr("udp4", "255.255.255.255:" + strconv.Itoa(broadcastListenPort))
 	if err != nil {
@@ -80,8 +80,8 @@ func Init(localListenPort, broadcastListenPort, messageSize int, sendChannel <- 
 		printDebug("Created a UDP broadcast listen socket")
 	}
 
-	go udpReceiveServer(localListenCon, bcListenCon, messageSize, receiveChannel)
-	go udpTransmitServer(localListenCon, bcListenCon, localListenPort, broadcastListenPort, sendChannel, bcAddr, locAddr)
+	go udpReceiveServer(localListenCon, bcListenCon, messageSize, receiveChannel, errorChannel)
+	go udpTransmitServer(localListenCon, bcListenCon, localListenPort, broadcastListenPort, sendChannel, bcAddr, locAddr, errorChannel)
 	return locAddr.IP.String(), err
 }
 
@@ -90,7 +90,7 @@ func Init(localListenPort, broadcastListenPort, messageSize int, sendChannel <- 
 	of messages in the form of an UDPMessage(struct). It communicates with other routines through a 
 	channel(sendChannel) where it receives UDPMessages to send.
 */
-func udpTransmitServer(loccon, bccon *net.UDPConn, localListenPort, bcListenPort int, sendChannel <-chan UDPMessage, bcAddr, locAddr *net.UDPAddr) {
+func udpTransmitServer(loccon, bccon *net.UDPConn, localListenPort, bcListenPort int, sendChannel <-chan UDPMessage, bcAddr, locAddr *net.UDPAddr, errorChannel chan<- bool) {
 	defer func() {
 		if r := recover(); r != nil {
 			printDebug("Error in udpTransmitServer: " + "\nClosing connection")
@@ -98,6 +98,8 @@ func udpTransmitServer(loccon, bccon *net.UDPConn, localListenPort, bcListenPort
 			bccon.Close()
 		}
 	}()
+
+	netErr := false
 
 	for {
 		select{
@@ -109,20 +111,12 @@ func udpTransmitServer(loccon, bccon *net.UDPConn, localListenPort, bcListenPort
 				printDebug(bcAddr.String())
 				n, err := bccon.WriteToUDP(message.Data, bcAddr)
 				printDebug(strconv.Itoa(n))
-				if (err != nil || n < 0) {
-					printDebug("Error ending broadcast message")
-					log.Fatal(err)
-				}
+				checkNetError(&netErr,err,  errorChannel)
 			} else {
 				raddr, err := net.ResolveUDPAddr("udp4", message.RAddress + ":" + strconv.Itoa(localListenPort))
-				if err != nil {
-					printDebug("TransmitServer:\t Could not resolve RAddress")
-					log.Fatal(err)
-				}
-				if n, err := loccon.WriteToUDP(message.Data, raddr); err != nil || n < 0 {
-					printDebug("TransmitServer:\t Error sending p2p message")
-					log.Fatal(err)
-				}
+				checkNetError(&netErr, err, errorChannel)
+				_, err = loccon.WriteToUDP(message.Data, raddr)
+				checkNetError(&netErr, err, errorChannel)
 			}
 		}
 	}
@@ -136,7 +130,7 @@ func udpTransmitServer(loccon, bccon *net.UDPConn, localListenPort, bcListenPort
 	communicates with these routines through two locally created channels where UDPMessages are being sent.
 */
 
-func udpReceiveServer(loccon, bccon *net.UDPConn, messageSize int, receiveChannel chan<- UDPMessage) {
+func udpReceiveServer(loccon, bccon *net.UDPConn, messageSize int, receiveChannel chan<- UDPMessage, errorChannel chan<- bool) {
 	defer func(){
 		if r := recover(); r != nil {
 			printDebug("Error in udpReceiveServer: " +  " Closing connection")
@@ -144,20 +138,8 @@ func udpReceiveServer(loccon, bccon *net.UDPConn, messageSize int, receiveChanne
 			bccon.Close()
 		}
 	}()
-
-	bcconRcvCh := make(chan UDPMessage)
-	locconRcvCh := make(chan UDPMessage)
-	go udpConnectionReader(loccon, messageSize, locconRcvCh)
-	go udpConnectionReader(bccon, messageSize, bcconRcvCh)
-
-	for{
-		select{
-		case message := <- bcconRcvCh:
-			receiveChannel <- message
-		case message := <- locconRcvCh:
-			receiveChannel <- message
-		}
-	}
+	go udpConnectionReader(loccon, messageSize, receiveChannel, errorChannel)
+	go udpConnectionReader(bccon, messageSize, receiveChannel, errorChannel)
 }
 
 /*
@@ -166,24 +148,33 @@ func udpReceiveServer(loccon, bccon *net.UDPConn, messageSize int, receiveChanne
 	where the message is passed as a UDPMessage.
 */
 
-func udpConnectionReader(conn *net.UDPConn, messageSize int, rcvCh chan<- UDPMessage) {
+func udpConnectionReader(conn *net.UDPConn, messageSize int, rcvCh chan<- UDPMessage, errorChannel chan<-bool){
 	defer func(){
 		if r := recover(); r != nil {
-			printDebug("ConnectionReader:\t Error in connectionReader: " +  "\nClosing connection")
+			printDebug("ConnectionReader:\t Error in connectionReader.\nClosing connection")
 			conn.Close()
 		} 
 	}()
-
+	netErr := false
 	for {
 		buffer := make([]byte, messageSize)
 		n, raddr, err := conn.ReadFromUDP(buffer)
-		if err != nil || n < 0 || n > messageSize {
-			printDebug("Error in ReadFromUDP" + err.Error())
-		} else {
+		checkNetError(&netErr, err, errorChannel)
+		if err == nil{
 			printDebug("ConnectionReader:\t Received package from: " + raddr.String())
 			printDebug("Listen:\t" + string(buffer[:]))
 			rcvCh <- UDPMessage{RAddress: raddr.String(), Data: buffer[:n], Length: n}
 		}
+	}
+}
+
+func checkNetError(e *bool, err error, errChan chan<- bool){
+	if !*e && (err != nil){
+		*e = true
+		errChan <- true
+	} else if *e && (err == nil) {
+		*e = false
+		errChan <- false
 	}
 }
 

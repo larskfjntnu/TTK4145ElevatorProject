@@ -36,8 +36,11 @@ const(
 	EventSendOrderToElevator = iota
 	EventAccOrderFromElevator
 	EventConfirmAccFromElevator
+	EventSetExternalLight
 	
 	// Events that may be received in ExtBackupStruct
+	EventNoNetwork
+	EventNetworkAvailable
 	EventSendBackupToAll
 	EventRequestStateFromElevator
 	EventStillOnline
@@ -66,6 +69,9 @@ var EventType = []string{
 	"EventSendOrderToElevator",
 	"EventAccOrderFromElevator",
 	"EventConfirmAccFromElevator",
+	"EventSetExternalLight",
+	"EventNoNetwork",
+	"EventNetworkAvailable",
 	"EventSendBackupToAll",
 	"EventRequestStateFromElevator",
 	"EventStillOnline",
@@ -101,6 +107,7 @@ type StateStruct struct {
 	ExternalOrders [2][N_FLOORS] bool
 	PrevFloor int // This is the latest valid floor
 	CurrentDirection int
+	PrevDirection int
 	Moving bool
 	OpenDoor bool
 }
@@ -109,6 +116,7 @@ type OrderStruct struct{
 	OrderID int
 	Floor int
 	Type int
+	Value bool
 	ReceivedTime time.Time
 	DispatchedTime time.Time
 	Status int
@@ -154,17 +162,16 @@ func (e ExtBackupStruct) Valid(localIP string) bool {
 			return false
 		}
 	}
-	if e.SentFrom  == localIP {
-		return false
-	}
-	if e.SentFrom == ""{
+	if e.SentFrom  == localIP || e.SentFrom == "" {
 		return false
 	}
 	return true
 }
 
-func (o ExtOrderStruct) Valid() bool {
-	// TODO -> Actually implement an acceptance test to see if the order is valid.
+func (o ExtOrderStruct) Valid(localIP string) bool {
+	if o.SentFrom == localIP || o.SentFrom == ""{
+		return false
+	}
 	return true
 }
 
@@ -184,6 +191,7 @@ func (e *Elevator) ShouldStop() bool {
 }
 
 func (e *Elevator) SetDirection(dir int){
+	e.State.PrevDirection = e.State.CurrentDirection
 	e.State.CurrentDirection = dir
 }
 
@@ -220,14 +228,22 @@ func (e *Elevator) GetNextDirection() int {
 		return DIR_STOP
 	}
 
-	switch e.State.CurrentDirection {
+	switch e.State.PrevDirection {
 	case DIR_DOWN:
 		if e.State.OrdersBelow() && e.State.PrevFloor != 0{
 			return DIR_DOWN
+		} else if e.State.PrevFloor == 0 && e.State.OrdersAbove(){
+			return DIR_UP
+		} else if e.State.OrdersAbove() && !e.State.OrdersBelow(){
+			return DIR_UP
 		}
 	case DIR_UP:
 		if e.State.OrdersAbove() && e.State.PrevFloor != N_FLOORS - 1{
 			return DIR_UP
+		} else if e.State.PrevFloor == N_FLOORS-1 && e.State.OrdersBelow(){
+			return DIR_DOWN
+		} else if e.State.OrdersBelow() && !e.State.OrdersAbove(){
+			return DIR_DOWN
 		}
 	case DIR_STOP:
 		if e.State.OrdersAbove() {

@@ -31,11 +31,12 @@ func Init(receiveOrderChannel chan ExtOrderStruct, receiveChannel chan ExtBackup
 	const UDPBroadcastListenPort = 9908
 	UDPSendChannel := make(chan udp.UDPMessage, 10)
 	UDPReceiveChannel := make(chan udp.UDPMessage)
-	localIP, err = udp.Init(UDPLocalListenPort, UDPBroadcastListenPort, messageSize, UDPSendChannel, UDPReceiveChannel)
+	errorChannel := make(chan bool)
+	localIP, err = udp.Init(UDPLocalListenPort, UDPBroadcastListenPort, messageSize, UDPSendChannel, UDPReceiveChannel, errorChannel)
 	if err != nil {
 		return "", err
 	}
-	go receiveOrderAndBackupServer(receiveOrderChannel, receiveChannel, UDPReceiveChannel, localIP)
+	go receiveOrderAndBackupServer(receiveOrderChannel, receiveChannel, UDPReceiveChannel, errorChannel, localIP)
 	go sendOrderAndBackupHandler(sendOrderChannel, sendChannel, UDPSendChannel)
 	return localIP, nil
 }
@@ -48,9 +49,16 @@ func Init(receiveOrderChannel chan ExtOrderStruct, receiveChannel chan ExtBackup
 	to the main module.(Make generic interface which supports extracting received messages.)
 	The receive channel is where these messages are passed to the calling module.
 */
-func receiveOrderAndBackupServer(receiveOrderChannel chan ExtOrderStruct, receiveBackupChannel chan ExtBackupStruct, UDPReceiveChannel <-chan udp.UDPMessage, localIP string) {
+func receiveOrderAndBackupServer(receiveOrderChannel chan ExtOrderStruct, receiveBackupChannel chan ExtBackupStruct, UDPReceiveChannel <-chan udp.UDPMessage, errorChannel <-chan bool, localIP string) {
 	for {
 		select {
+		case err := <- errorChannel:
+			if err {
+				receiveBackupChannel <- ExtBackupStruct{Event: EventNoNetwork,}
+			} else {
+				receiveBackupChannel <- ExtBackupStruct{Event: EventNetworkAvailable,}
+			}
+
 		case message := <-UDPReceiveChannel:
 			var f interface{}
 			err := json.Unmarshal(message.Data[:message.Length], &f)
@@ -60,10 +68,10 @@ func receiveOrderAndBackupServer(receiveOrderChannel chan ExtOrderStruct, receiv
 			} else {
 				m := f.(map[string]interface{})
 				eventNum := int(m["Event"].(float64))
-				if eventNum <= 2 && eventNum >= 0 {
+				if eventNum <= 3 && eventNum >= 0 {
 					var newExtOrder = ExtOrderStruct{}
 					if err := json.Unmarshal(message.Data[:message.Length], &newExtOrder); err == nil{
-						if newExtOrder.Valid() {
+						if newExtOrder.Valid(localIP) {
 							receiveOrderChannel <- newExtOrder;
 							printDebug("Received a ExtOrderStruct with event: " + EventType[newExtOrder.Event])
 						} else {
@@ -72,7 +80,7 @@ func receiveOrderAndBackupServer(receiveOrderChannel chan ExtOrderStruct, receiv
 					} else {
 						printDebug("Error unmarshaling an ExtOrderStruct")
 					}
-				} else if eventNum >= 3 && eventNum <= 8 {
+				} else if eventNum >= 4 && eventNum <= 11 {
 					var newExtBackup = ExtBackupStruct{}
 					if err := json.Unmarshal(message.Data[:message.Length], &newExtBackup); err == nil {
 						if newExtBackup.Valid(localIP) {
