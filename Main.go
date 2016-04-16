@@ -22,7 +22,7 @@ import (
 	"./src/costFunction1"
 	"strconv"
 	"strings"
-	"./src/hardwareSim"
+	"./src/hardware"
 	"./src/network"
 	. "./src/typedef"
 	"os"
@@ -33,7 +33,7 @@ const debug bool = true
 
 func main() {
 	defer func(){
-		hardwareSim.SetMotorDirection(DIR_STOP)
+		hardware.SetMotorDirection(DIR_STOP)
 	}()
 	// Order id can be generated from IP address + some counting variable
 
@@ -72,7 +72,7 @@ func main() {
 
 	// Initializing hardware
 	hardwareChannel := make(chan HardwareEvent, 10)
-	if err := hardwareSim.Init(hardwareChannel, pollingDelay); err != nil {
+	if err := hardware.Init(hardwareChannel, pollingDelay); err != nil {
 		printDebug("Hardware Initializing failed")
 		log.Fatal(err)
 	} else {
@@ -108,6 +108,7 @@ func main() {
 	// Finish localState and make this elevator 'known' to itself.
 	localState.LocalIP = localIP 
 	knownElevators[localIP] = &Elevator{State: localState,}
+	activeElevators[localIP] = false // Dont see ourself as "active"
 	checkOnlineAndReassign(knownElevators, activeElevators, localIP, elevatorOnlineTimeout)
 	printDebug("Finished initializing state, starting from floor: " + strconv.Itoa(knownElevators[localIP].State.PrevFloor))
 
@@ -231,7 +232,7 @@ func main() {
 							openDoor(doorTimer, doorOpentime, knownElevators, localIP)
 						} else {
 							knownElevators[localIP].SetInternalOrder(hwEvent.Floor, true)
-							hardwareSim.SetLights(hwEvent.ButtonType, hwEvent.Floor, true)
+							hardware.SetLights(hwEvent.ButtonType, hwEvent.Floor, true)
 							if knownElevators[localIP].GetDirection() == DIR_STOP && !knownElevators[localIP].DoorOpen(){
 								startMoving(knownElevators, localIP)
 							}
@@ -241,7 +242,7 @@ func main() {
 
 					// Stop button pressed, can perhaps remove this?
 					case BUTTON_STOP:
-						hardwareSim.SetMotorDirection(DIR_STOP)
+						hardware.SetMotorDirection(DIR_STOP)
 						printDebug("\n\n\n")
 						printDebug("Elevator was killed\n\n\n")
 						time.Sleep(300*time.Millisecond)
@@ -264,7 +265,7 @@ func main() {
 					openDoor(doorTimer, doorOpentime, knownElevators, localIP)
 					
 					knownElevators[localIP].SetInternalOrder(hwEvent.Floor, false)
-					hardwareSim.SetLights(BUTTON_COMMAND, hwEvent.Floor, false)
+					hardware.SetLights(BUTTON_COMMAND, hwEvent.Floor, false)
 					if hwEvent.CurrentDirection == DIR_DOWN || (hwEvent.CurrentDirection == DIR_UP && !knownElevators[localIP].State.OrdersAbove()) { 
 						editOrderOnThisElevator(hwEvent.Floor, BUTTON_CALL_DOWN, false, knownElevators, localIP)
 						setLightsOnAllElevators(hwEvent.Floor, BUTTON_CALL_DOWN, false, localIP, sendOrderChannel)
@@ -324,7 +325,7 @@ func main() {
 			// Other elevator has external order, set light
 			case EventSetExternalLight:
 				printDebug(fmt.Sprintf("Setting ext light at floor %d in direction %s\n", extOrder.Order.Floor, HardwareEventType[extOrder.Order.Type]))
-				hardwareSim.SetLights(extOrder.Order.Type, extOrder.Order.Floor, extOrder.Order.Value)			
+				hardware.SetLights(extOrder.Order.Type, extOrder.Order.Floor, extOrder.Order.Value)			
 			default:
 				printDebug("Received unknown event in extOrder")	
 				
@@ -467,7 +468,7 @@ func main() {
 		case <- doorTimer.C:
 			printDebug("Closing door ")
 			knownElevators[localIP].State.OpenDoor = false
-			hardwareSim.SetLights(DOOR_LAMP, 0, false)
+			hardware.SetLights(DOOR_LAMP, 0, false)
 
 			// Check if we should start to move
 			if knownElevators[localIP].State.HaveOrders(){
@@ -572,7 +573,7 @@ func editOrderOnThisElevator(floor, typ int, add bool, knownElevators map[string
 		case BUTTON_CALL_UP:
 			knownElevators[localIP].State.ExternalOrders[1][floor] = add
 	}
-	hardwareSim.SetLights(typ, floor, add)
+	hardware.SetLights(typ, floor, add)
 }
 
 func allOtherAccBackup(backupAcknowledgementList, activeElevators map[string]bool) bool {
@@ -598,7 +599,7 @@ func otherActiveElevators(activeElevators map[string]bool, localIP string) bool 
 
 func openDoor(doorTimer *time.Timer, doorOpentime time.Duration, knownElevators map[string]*Elevator, localIP string){
 	doorTimer.Reset(doorOpentime)
-	hardwareSim.SetLights(DOOR_LAMP, 0, true)
+	hardware.SetLights(DOOR_LAMP, 0, true)
 	knownElevators[localIP].State.OpenDoor = true
 }
 
@@ -606,20 +607,20 @@ func startMoving(knownElevators map[string]*Elevator, localIP string){
 	knownElevators[localIP].SetDirection(knownElevators[localIP].GetNextDirection())
 	printDebug("Next Direction: 	" + MotorDirections[knownElevators[localIP].GetDirection() + 1])
 	knownElevators[localIP].SetMoving(knownElevators[localIP].State.CurrentDirection != DIR_STOP)
-	hardwareSim.SetLights(BUTTON_COMMAND, knownElevators[localIP].State.PrevFloor, false)
-	//hardwareSim.SetMotorDirection(knownElevators[localIP].State.CurrentDirection)
+	hardware.SetLights(BUTTON_COMMAND, knownElevators[localIP].State.PrevFloor, false)
+	//hardware.SetMotorDirection(knownElevators[localIP].State.CurrentDirection)
 }
 
 func stopMoving(knownElevators map[string]*Elevator, localIP string, floor int){
-	hardwareSim.SetMotorDirection(DIR_STOP)
+	hardware.SetMotorDirection(DIR_STOP)
 	knownElevators[localIP].SetMoving(false)
 	knownElevators[localIP].SetDirection(DIR_STOP)
-	hardwareSim.SetLights(BUTTON_COMMAND, floor, false)
+	hardware.SetLights(BUTTON_COMMAND, floor, false)
 }
 
 func setLightsFromBackup(backup StateStruct){
 	for floor, value := range backup.InternalOrders{
-		hardwareSim.SetLights(BUTTON_COMMAND, floor, value)
+		hardware.SetLights(BUTTON_COMMAND, floor, value)
 	}
 }
 

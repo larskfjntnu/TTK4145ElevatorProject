@@ -66,11 +66,13 @@ func CalculateRespondingElevator(knownElevators map[string]*Elevator, activeElev
 				//f := tempElevator.GetFloor()
 				tempElevator.SetDirection(tempElevator.GetNextDirection())
 				tempElevator.SetFloor(tempElevator.GetFloor() + tempElevator.GetDirection())
+				fmt.Printf("Dir: 	%s, toFloor:	%d\n", MotorDirections[tempElevator.GetDirection()+1], tempElevator.GetFloor())
 				//fmt.Printf("From floor %d to %d\n", f, tempElevator.GetFloor())
 				//fmt.Printf("Last direction %s, Current direction %s\n", MotorDirections[tempElevator.State.PrevDirection + 1], MotorDirections[tempElevator.GetDirection() + 1])
 
 				if tempElevator.ShouldStop(){
 					tempElevator.SetDirection(DIR_STOP)
+					fmt.Println("Stopped")
 					if tempElevator.GetFloor() == floor{
 						// We are at the ordered floor
 						if (tempElevator.GetNextDirection() == bdir) || (tempElevator.GetNextDirection() == DIR_STOP){
@@ -90,9 +92,18 @@ func CalculateRespondingElevator(knownElevators map[string]*Elevator, activeElev
 					}else if tempElevator.GetDirection() == DIR_DOWN || tempElevator.GetNextDirection() == DIR_DOWN{
 						d = BUTTON_CALL_DOWN
 					}
+					fmt.Printf("Cancel order %d at floor %d\n", d, tempElevator.GetFloor())
+					fmt.Println(tempElevator.MakeQueue())
 					tempElevator.SetInternalOrder(tempElevator.GetFloor(), false)
 					tempElevator.State.ExternalOrders[d][tempElevator.GetFloor()] = false
+					if !tempElevator.State.OrdersAbove() || !tempElevator.State.OrdersBelow(){
+						tempElevator.State.ExternalOrders[0][tempElevator.GetFloor()] = false
+						tempElevator.State.ExternalOrders[1][tempElevator.GetFloor()] = false
+					}
+
+
 					//fmt.Println(tempElevator.MakeQueue())
+					fmt.Println(tempElevator.MakeQueue())
 				}
 				cost += 2
 			}
