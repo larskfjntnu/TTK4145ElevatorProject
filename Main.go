@@ -40,19 +40,19 @@ func main() {
 	const pollingDelay = 50 * time.Millisecond
 	const connectionLimit = 5
 
-	const checkElevatorsTick = 1000 * time.Millisecond
+	const checkElevatorsTick = 500 * time.Millisecond
 	const checkBackupAccTick = 500 * time.Millisecond
 	const checkOrderAccTick = 500 * time.Millisecond
 	const dispatchOrderTick = 500 * time.Millisecond
 	const thisElevatorOnlineTick = 100 * time.Millisecond
 	
-	const elevatorOnlineTimeout = 30 * checkElevatorsTick
-	const backupTimeout = 30 * checkBackupAccTick
-	const orderTimeout = 30 * checkOrderAccTick
-	const dispatchOrderTimeout = 30 * dispatchOrderTick
+	const elevatorOnlineTimeout = 2 * checkElevatorsTick
+	const backupTimeout = 3 * checkBackupAccTick
+	const orderTimeout = 3 * checkOrderAccTick
+	const dispatchOrderTimeout = 3 * dispatchOrderTick
 	
 	const initialBackupRequestTimeout = 3000 * time.Millisecond
-	const doorOpentime = 3000 * time.Millisecond
+	const doorOpentime = 1500 * time.Millisecond
 	
 
 	var localIP string
@@ -60,7 +60,7 @@ func main() {
 	var stateChanged bool 
 	var locOrderID int
 	var networkAvailable = true
-
+	var backupConfirmed = true
 	var knownElevators = make(map[string]*Elevator) // IP address is key
 	var waitingBackups = make(map[string]*BackupStruct)
 	var haveBackups = make(map[string]bool)
@@ -99,18 +99,17 @@ func main() {
 	localIP, err := networkInit(connectionLimit, receiveOrderChannel, sendOrderChannel, receiveBackupChannel, sendBackupChannel, 2*time.Second)
 	locOrderID = seedOrderID(localIP)*1000
 	if err != nil {
-		printDebug("network Initializing failed")
+		printDebug("Network initializing failed")
 		log.Fatal(err)
 	} else {
-		printDebug("Network Initializing successful")
+		printDebug("Network initializing successful")
 	}
 
 	// Finish localState and make this elevator 'known' to itself.
 	localState.LocalIP = localIP 
 	knownElevators[localIP] = &Elevator{State: localState,}
 	activeElevators[localIP] = false // Dont see ourself as "active"
-	checkOnlineAndReassign(knownElevators, activeElevators, localIP, elevatorOnlineTimeout)
-	printDebug("Finished initializing state, starting from floor: " + strconv.Itoa(knownElevators[localIP].State.PrevFloor))
+	checkOnlineElevators(knownElevators, activeElevators, localIP, elevatorOnlineTimeout)
 
 
 	// Initializing state
@@ -119,8 +118,6 @@ func main() {
 		Event: EventRequestStateFromElevator,
 	}
 	hasRequestedBackup := true
-	printDebug("Waiting for backup")
-	
 	
 	t := time.After(3000*time.Millisecond)
 	L: // This will make the break statement in the loop break both the select and the for
@@ -134,7 +131,8 @@ func main() {
 
 					// Set the current state to the state received here.
 					knownElevators[localIP].State.InternalOrders = extBackup.BackupData.CurrentState.InternalOrders
-					setLightsFromBackup(knownElevators[localIP].State)
+					knownElevators[localIP].State.ExternalOrders = extBackup.BackupData.CurrentState.ExternalOrders
+					setLightsFromBackup(knownElevators[localIP].State, localIP, sendOrderChannel)
 					startMoving(knownElevators, localIP)
 					hasRequestedBackup  = false
 					printDebug("Received backup from " + extBackup.SentFrom)
@@ -148,7 +146,6 @@ func main() {
 		}
 
 	}
-	printDebug("Initializing done...........!")
 
 	// Initializing timers
 	checkIfOnlineTicker := time.NewTicker(checkElevatorsTick)
@@ -181,7 +178,7 @@ func main() {
 
 		//Hardware events
 		case hwEvent := <- hardwareChannel:
-			printDebug("Received a " + EventType[hwEvent.Event] + " from floor " + strconv.Itoa(hwEvent.Floor))
+			printDebug(EventType[hwEvent.Event] + " from floor " + strconv.Itoa(hwEvent.Floor))
 			
 			switch hwEvent.Event{
 				
@@ -248,13 +245,12 @@ func main() {
 						time.Sleep(300*time.Millisecond)
 						os.Exit(1)
 					default:
-						printDebug("Received button event from the hardware module")
+						printDebug("Received unknown button event from the hardware module")
 					}
 				
 				// A floor is reached	
 			case EventFloorReached:
 				// Reached a floor
-				printDebug(localIP + " Reached floor: " + strconv.Itoa(hwEvent.Floor))
 				knownElevators[localIP].SetFloor(hwEvent.Floor)
 				if knownElevators[localIP].ShouldStop(){
 					
@@ -280,13 +276,12 @@ func main() {
 
 		// Order events
 		case extOrder := <-receiveOrderChannel:
-			printDebug("Received an " + EventType[extOrder.Event] + " from " + extOrder.SentFrom)
+			printDebug(EventType[extOrder.Event] + " from " + extOrder.SentFrom)
 
 			switch extOrder.Event {
 			// Received new order
 			case EventSendOrderToElevator:
 				order := extOrder.Order
-				printDebug("Order " + HardwareEventType[order.Type] + " on floor " + strconv.Itoa(order.Floor))
 				waitingOrders[order.OrderID] = &order
 				waitingOrders[order.OrderID].ReceivedTime = time.Now()
 				
@@ -302,17 +297,20 @@ func main() {
 					order := waitingOrders[extOrder.OrderID]
 					editOrderOnThisElevator(order.Floor, order.Type, true, knownElevators, localIP)
 					log.Println(knownElevators[localIP].MakeQueue())
+					log.Println("DIR: " + MotorDirections[knownElevators[localIP].GetDirection() + 1])
 					if knownElevators[localIP].GetDirection() == DIR_STOP && !knownElevators[localIP].DoorOpen() {
+						printDebug("Start moving")
 						startMoving(knownElevators, localIP)
+					}else {
+						if knownElevators[localIP].GetDirection() == DIR_STOP && order.Floor == knownElevators[localIP].GetFloor(){
+								printDebug("Opening door")
+								openDoor(doorTimer, doorOpentime, knownElevators, localIP)
+								editOrderOnThisElevator(order.Floor, order.Type, false, knownElevators, localIP)
+						}
+						setLightsOnAllElevators(order.Floor, order.Type, true, localIP, sendOrderChannel)
+						stateChanged = true
+						delete(waitingOrders, extOrder.OrderID)
 					}
-					if knownElevators[localIP].GetDirection() == DIR_STOP && order.Floor == knownElevators[localIP].GetFloor(){
-							printDebug("Opening door")
-							openDoor(doorTimer, doorOpentime, knownElevators, localIP)
-							editOrderOnThisElevator(order.Floor, order.Type, false, knownElevators, localIP)
-					}
-					setLightsOnAllElevators(order.Floor, order.Type, true, localIP, sendOrderChannel)
-					stateChanged = true
-					delete(waitingOrders, extOrder.OrderID)
 				}
 				
 			// Received acc on dispatched order
@@ -324,7 +322,7 @@ func main() {
 													 Event: EventConfirmAccFromElevator}
 			// Other elevator has external order, set light
 			case EventSetExternalLight:
-				printDebug(fmt.Sprintf("Setting ext light at floor %d in direction %s\n", extOrder.Order.Floor, HardwareEventType[extOrder.Order.Type]))
+				printDebug(fmt.Sprintf("Ext light F: %d D: %s V: %t\n", extOrder.Order.Floor, HardwareEventType[extOrder.Order.Type], extOrder.Order.Value))
 				hardware.SetLights(extOrder.Order.Type, extOrder.Order.Floor, extOrder.Order.Value)			
 			default:
 				printDebug("Received unknown event in extOrder")	
@@ -334,7 +332,7 @@ func main() {
 		// Backup
 		case extBackup := <- receiveBackupChannel:
 			
-			if _, ok := knownElevators[extBackup.SentFrom]; !ok {
+			if _, ok := knownElevators[extBackup.SentFrom]; !ok && extBackup.Event != EventNoNetwork && extBackup.Event != EventNetworkAvailable {
 				// New elevator on network, add it and push our state again.
 				
 				newElev := Elevator{Time: time.Now(),}
@@ -365,17 +363,21 @@ func main() {
 					waitingBackups[extBackup.SentFrom] = &extBackup.BackupData
 					waitingBackups[extBackup.SentFrom].BackupTime = time.Now()
 					sendBackupChannel <- ExtBackupStruct{SentFrom: localIP, SendTo: extBackup.SentFrom, Event: EventAccBackup}
+					backupConfirmed = false
 				}
 				// Update last time backup was received
 				knownElevators[extBackup.SentFrom].Time = time.Now()
 				
 			case EventBackupAtAllConfirmed:
-				printDebug("BackupConfirmed")
+				if !backupConfirmed{
+				printDebug("BackupConfirmed from :" + extBackup.SentFrom)
 				backup := waitingBackups[extBackup.SentFrom]
 				knownElevators[extBackup.SentFrom].State = backup.CurrentState
 				knownElevators[extBackup.SentFrom].Time = time.Now()
 				haveBackups[extBackup.SentFrom] = true
 				delete(waitingBackups, extBackup.SentFrom)
+				backupConfirmed = true
+			}
 				
 			// Backup sender side
 			case EventAccBackup:
@@ -420,7 +422,7 @@ func main() {
 			
 
 		case <- checkIfOnlineTicker.C:
-			checkOnlineAndReassign(knownElevators, activeElevators, localIP, elevatorOnlineTimeout)
+			checkOnlineElevators(knownElevators, activeElevators, localIP, elevatorOnlineTimeout)
 
 		case <- checkBackupAccTicker.C:
 			// Removed waiting backups that have timed out.
@@ -499,51 +501,20 @@ func networkInit(connectionLimit int, receiveOrderChannel chan ExtOrderStruct, s
 	return "", nil
 }
 
-func checkOnlineAndReassign(knownElevators map[string]*Elevator, activeElevators map[string]bool, localIP string, timeoutLimit time.Duration) {
-	
-	removed := make(map[string]*Elevator)
+func checkOnlineElevators(knownElevators map[string]*Elevator, activeElevators map[string]bool, localIP string, timeoutLimit time.Duration) {
 
 	for key := range knownElevators{
 		if key == localIP{
 			activeElevators[key] = false // dont want to see ourself
 		}else if time.Since(knownElevators[key].Time) <= timeoutLimit {
-			fmt.Println(time.Since(knownElevators[key].Time))
 			if activeElevators[key] != true {
 				activeElevators[key] = true
 				printDebug("Added active elevator " + knownElevators[key].State.LocalIP)
 			}
 		} else {
 			if activeElevators[key] == true {
-				printDebug("Removing inactive elevator " + knownElevators[key].State.LocalIP)
-				removed[key] = knownElevators[key]
 				activeElevators[key] = false
-			}
-		}
-	}
-
-	for _, elevator := range(removed){
-		exDown := elevator.State.ExternalOrders[0]
-		exUp := elevator.State.ExternalOrders[1]
-
-		for floor, ordered := range exDown{
-			if ordered{
-				assigned, err := costFunction1.CalculateRespondingElevator(knownElevators, activeElevators, localIP, BUTTON_CALL_DOWN, floor)
-				if err != nil{
-					log.Fatal(err)
-				} else {
-					printDebug(fmt.Sprintf("Order %s at floor %d assigned to %s\n", HardwareEventType[BUTTON_CALL_DOWN], floor, assigned))
-				}
-			}
-		}
-
-		for floor, ordered := range exUp{
-			if ordered{
-				assigned, err := costFunction1.CalculateRespondingElevator(knownElevators, activeElevators, localIP, BUTTON_CALL_UP, floor)
-				if err != nil{
-					log.Fatal(err)
-				} else {
-					printDebug(fmt.Sprintf("Order %s at floor %d assigned to %s\n", HardwareEventType[BUTTON_CALL_UP], floor, assigned))
-				}
+				printDebug("Removed inactive elevator " + knownElevators[key].State.LocalIP)
 			}
 		}
 	}
@@ -605,10 +576,9 @@ func openDoor(doorTimer *time.Timer, doorOpentime time.Duration, knownElevators 
 
 func startMoving(knownElevators map[string]*Elevator, localIP string){
 	knownElevators[localIP].SetDirection(knownElevators[localIP].GetNextDirection())
-	printDebug("Next Direction: 	" + MotorDirections[knownElevators[localIP].GetDirection() + 1])
 	knownElevators[localIP].SetMoving(knownElevators[localIP].State.CurrentDirection != DIR_STOP)
 	hardware.SetLights(BUTTON_COMMAND, knownElevators[localIP].State.PrevFloor, false)
-	//hardware.SetMotorDirection(knownElevators[localIP].State.CurrentDirection)
+	hardware.SetMotorDirection(knownElevators[localIP].State.CurrentDirection)
 }
 
 func stopMoving(knownElevators map[string]*Elevator, localIP string, floor int){
@@ -618,10 +588,23 @@ func stopMoving(knownElevators map[string]*Elevator, localIP string, floor int){
 	hardware.SetLights(BUTTON_COMMAND, floor, false)
 }
 
-func setLightsFromBackup(backup StateStruct){
+func setLightsFromBackup(backup StateStruct, localIP string, sendOrderChannel chan ExtOrderStruct){
 	for floor, value := range backup.InternalOrders{
 		hardware.SetLights(BUTTON_COMMAND, floor, value)
 	}
+	for floor, value := range backup.ExternalOrders[0]{
+		if value{
+			setLightsOnAllElevators(floor, BUTTON_CALL_DOWN, true, localIP, sendOrderChannel)
+		}
+		hardware.SetLights(floor, BUTTON_CALL_DOWN, value)
+	}
+	for floor, value := range backup.ExternalOrders[1]{
+		if value {
+			setLightsOnAllElevators(floor, BUTTON_CALL_UP, true, localIP, sendOrderChannel)
+		}
+		hardware.SetLights(floor, BUTTON_CALL_UP, value)
+	}
+
 }
 
 /*

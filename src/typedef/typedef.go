@@ -66,20 +66,20 @@ var HardwareEventType = []string{
 }
 
 var EventType = []string{
-	"EventSendOrderToElevator",
-	"EventAccOrderFromElevator",
-	"EventConfirmAccFromElevator",
-	"EventSetExternalLight",
-	"EventNoNetwork",
-	"EventNetworkAvailable",
-	"EventSendBackupToAll",
-	"EventRequestStateFromElevator",
-	"EventStillOnline",
-	"EventAccBackup",
-	"EventBackupAtAllConfirmed",
-	"EventAnsweringBackupRequest",
-	"EventButtonPressed",
-	"EventFloorReached",
+	"SendOrderToElevator",
+	"AccOrderFromElevator",
+	"ConfirmAccFromElevator",
+	"SetExternalLight",
+	"NoNetwork",
+	"NetworkAvailable",
+	"SendBackupToAll",
+	"RequestStateFromElevator",
+	"StillOnline",
+	"AccBackup",
+	"BackupAtAllConfirmed",
+	"AnsweringBackupRequest",
+	"ButtonPressed",
+	"FloorReached",
 }
 
 var MotorDirections = []string {

@@ -110,13 +110,20 @@ func udpTransmitServer(loccon, bccon *net.UDPConn, localListenPort, bcListenPort
 			if message.RAddress == "broadcast" {
 				printDebug(bcAddr.String())
 				n, err := bccon.WriteToUDP(message.Data, bcAddr)
-				printDebug(strconv.Itoa(n))
-				checkNetError(&netErr,err,  errorChannel)
+				printDebug("Received"  + strconv.Itoa(n))
+				checkNetError(&netErr, err, errorChannel)
+				if err != nil{
+					printDebug(err.Error())
+				}
+				//checkNetError(&netErr,err,  errorChannel)
 			} else {
 				raddr, err := net.ResolveUDPAddr("udp4", message.RAddress + ":" + strconv.Itoa(localListenPort))
 				checkNetError(&netErr, err, errorChannel)
 				_, err = loccon.WriteToUDP(message.Data, raddr)
-				checkNetError(&netErr, err, errorChannel)
+				if err != nil {
+					printDebug("Received"  + err.Error())
+				}
+				//checkNetError(&netErr, err, errorChannel)
 			}
 		}
 	}
